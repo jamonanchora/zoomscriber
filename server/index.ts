@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from "express";
 import { zoomWebhookRouter } from "./routes/webhooks.js";
+import { oauthRouter } from "./routes/oauth.js";
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.get("/healthz", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+app.use("/oauth", oauthRouter);
 app.use("/webhooks/zoom", zoomWebhookRouter);
 
 const port = Number(process.env.PORT ?? 3000);

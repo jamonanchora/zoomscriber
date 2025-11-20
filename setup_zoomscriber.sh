@@ -12,7 +12,6 @@ APP_DOMAIN="zoomscriber.jamonlyons.com"     # DNS must point to this server
 APP_PORT="3000"
 
 # Required secrets
-ZOOM_ACCOUNT_ID="replace-me"
 ZOOM_CLIENT_ID="replace-me"
 ZOOM_CLIENT_SECRET="replace-me"
 ZOOM_WEBHOOK_SECRET="replace-me"     # or set ZOOM_VERIFICATION_TOKEN instead
@@ -81,9 +80,9 @@ PORT=${APP_PORT}
 NODE_ENV=production
 APP_BASE_URL=https://${APP_DOMAIN}
 
-ZOOM_ACCOUNT_ID=${ZOOM_ACCOUNT_ID}
 ZOOM_CLIENT_ID=${ZOOM_CLIENT_ID}
 ZOOM_CLIENT_SECRET=${ZOOM_CLIENT_SECRET}
+ZOOM_REDIRECT_URI=https://${APP_DOMAIN}/oauth/callback
 ZOOM_WEBHOOK_SECRET=${ZOOM_WEBHOOK_SECRET}
 # ZOOM_VERIFICATION_TOKEN=optional_legacy
 
