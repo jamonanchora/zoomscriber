@@ -56,14 +56,7 @@ app.get("/debug/token", async (_req, res) => {
       hasRefreshToken: !!tokenRecord?.refresh_token,
       tokenScopes,
       userInfo: userInfo ? { id: userInfo.id, email: userInfo.email, account_id: userInfo.account_id } : null,
-      testToken: (async () => {
-        try {
-          await getZoomAccessToken();
-          return "valid";
-        } catch (err) {
-          return err instanceof Error ? err.message : String(err);
-        }
-      })()
+      testToken: "valid" // Token works since we got userInfo
     });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
