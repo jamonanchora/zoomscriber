@@ -5,22 +5,41 @@ import { runTranscriptionFlow } from "../services/transcribeFlow.js";
 
 export const zoomWebhookRouter = Router();
 
+// Test endpoint (no verification) to check if webhook is reachable
+zoomWebhookRouter.get("/test", (_req: Request, res: Response) => {
+  res.status(200).json({ message: "Webhook endpoint is reachable", timestamp: new Date().toISOString() });
+});
+
 // Verify signatures and tokens
 zoomWebhookRouter.use(verifyZoomRequest);
 
 // Main webhook endpoint
 zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
+  // Log incoming webhook for debugging
+  console.log("Webhook received:", {
+    event: req.body?.event,
+    hasPayload: !!req.body?.payload,
+    headers: {
+      signature: req.get("x-zm-signature"),
+      timestamp: req.get("x-zm-request-timestamp")
+    }
+  });
+
   // Acknowledge immediately (Zoom expects 200 quickly)
   res.status(200).send();
 
   try {
     const eventId: string | undefined = req.body?.event_id ?? req.body?.eventId;
     if (eventId) {
-      if (seenRecently(eventId)) return; // dedupe
+      if (seenRecently(eventId)) {
+        console.log("Duplicate event ignored:", eventId);
+        return; // dedupe
+      }
       markSeen(eventId);
     }
 
     const event: string | undefined = req.body?.event;
+    console.log("Processing event:", event);
 
     // Slash command delivery (shape may vary; handle commonly seen fields)
     if (event === "bot_notification" && req.body?.payload?.cmd) {
