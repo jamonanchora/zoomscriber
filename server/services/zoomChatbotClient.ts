@@ -21,17 +21,29 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     throw new Error(`Failed to get access token: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Ensure account_id is included if not provided
-  const finalPayload = { ...payload };
-  if (!finalPayload.account_id) {
-    // Try to get account_id from config or token
-    const { loadConfig } = await import("../config.js");
-    const config = loadConfig();
-    // For OAuth apps, account_id might be needed - but we don't have it in config
-    // Zoom might extract it from the token, so we'll try without it first
+  // Get account_id from user info if not provided
+  let accountId = payload.account_id;
+  if (!accountId) {
+    try {
+      // Fetch user info to get account_id
+      const userResp = await fetch("https://api.zoom.us/v2/users/me", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (userResp.ok) {
+        const userData = (await userResp.json()) as { account_id?: string };
+        accountId = userData.account_id;
+      }
+    } catch (err) {
+      console.warn("Could not fetch account_id from user info:", err);
+    }
   }
 
-  console.log("Sending chatbot message:", JSON.stringify(finalPayload, null, 2));
+  const finalPayload: ChatbotMessage = {
+    ...payload,
+    account_id: accountId
+  };
+
+  console.log("Sending chatbot message (account_id:", accountId, ")");
   
   const resp = await fetch(CHATBOT_SEND_URL, {
     method: "POST",

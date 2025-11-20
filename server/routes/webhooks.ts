@@ -81,6 +81,8 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
       }
 
       // Extract user and message info from payload
+      // For visible_to_user, we need the member_id (JID), not the user_id
+      const operatorMemberId = payload?.operator_member_id || payload?.operator?.member_id;
       const userId = payload?.operator_id || payload?.operator?.user_id || payload?.reactor?.user_id || payload?.user_id;
       const messageId = payload?.object?.msg_id || payload?.msg_id;
       const contactId = payload?.object?.contact_id || payload?.contact_id;
@@ -128,11 +130,19 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
         return;
       }
 
+      // Use operator_member_id (JID) for visible_to_user, fallback to userId if not available
+      const visibleToUser = operatorMemberId || userId;
+      
+      if (!visibleToUser) {
+        console.error("Could not determine visible_to_user (need operator_member_id or userId)");
+        return;
+      }
+
       console.log("Starting transcription flow...");
       try {
         await runTranscriptionFlow({ 
           toJid: String(toJid), 
-          visibleToUserId: String(userId), 
+          visibleToUserId: String(visibleToUser), 
           fileId: fileId ? String(fileId) : "", 
           downloadUrl: downloadUrl,
           threadTs: undefined 
