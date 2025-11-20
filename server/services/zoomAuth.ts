@@ -19,15 +19,19 @@ export async function getZoomAccessToken(): Promise<string> {
 
   // If we have a valid token, return it
   if (tokenRecord && Date.now() < tokenRecord.expires_at - 60_000) {
+    console.log("Using cached access token (expires in", Math.round((tokenRecord.expires_at - Date.now()) / 1000), "seconds)");
     return tokenRecord.access_token;
   }
 
   // If we have a refresh token, use it
   if (tokenRecord?.refresh_token) {
+    console.log("Token expired, refreshing...");
     try {
       const newToken = await refreshAccessToken(tokenRecord.refresh_token);
+      console.log("Token refreshed successfully");
       return newToken;
     } catch (err) {
+      console.error("Token refresh failed:", err);
       // Refresh failed, need to re-authorize
       throw new Error("OAuth token expired. Please re-authorize the app at /oauth/install");
     }
@@ -54,11 +58,28 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
 
   if (!resp.ok) {
     const text = await resp.text();
+    console.error("Token refresh API error:", resp.status, text);
     throw new Error(`Token refresh failed: ${resp.status} ${text}`);
   }
 
   const data = (await resp.json()) as TokenResponse;
-  updateAccessToken(ADMIN_ACCOUNT_ID, data.access_token, data.expires_in);
+  if (!data.access_token) {
+    throw new Error("Token refresh response missing access_token");
+  }
+  
+  // Update both access and refresh tokens if provided
+  if (data.refresh_token) {
+    saveToken(ADMIN_ACCOUNT_ID, data.access_token, data.refresh_token, data.expires_in);
+  } else {
+    // Keep existing refresh token if new one not provided
+    const existing = getToken(ADMIN_ACCOUNT_ID);
+    updateAccessToken(ADMIN_ACCOUNT_ID, data.access_token, data.expires_in);
+    if (existing?.refresh_token) {
+      // Update refresh token in DB if we have it
+      saveToken(ADMIN_ACCOUNT_ID, data.access_token, existing.refresh_token, data.expires_in);
+    }
+  }
+  
   return data.access_token;
 }
 
