@@ -13,9 +13,8 @@ export type ChatbotMessage = {
   };
 };
 
-// Try both endpoints - chatbot API and team chat API
+// Chatbot API endpoint
 const CHATBOT_SEND_URL = "https://api.zoom.us/v2/im/chat/messages";
-const TEAM_CHAT_SEND_URL = "https://api.zoom.us/v2/team-chat/chat/messages";
 
 export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void> {
   let token: string;
@@ -81,53 +80,60 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     has_thread_ts: !!payload.thread_ts
   });
   
-  // Try chatbot API first
-  let resp = await fetch(CHATBOT_SEND_URL, {
+  // Bot JID is required for chatbot messages
+  if (!robotJid) {
+    throw new Error("Bot JID (robot_jid) is required. Set ZOOM_BOT_JID in environment or ensure bot is configured.");
+  }
+
+  // Build the correct payload format for chatbot API
+  // Based on Zoom's chatbot API documentation
+  const chatbotPayload: any = {
+    robot_jid: robotJid, // Bot JID is required
+    to_jid: finalPayload.to_jid,
+    account_id: accountId,
+    content: finalPayload.content
+  };
+  
+  // Add optional fields
+  if (finalPayload.visible_to_user) {
+    chatbotPayload.visible_to_user = finalPayload.visible_to_user;
+  }
+  if (finalPayload.thread_ts) {
+    chatbotPayload.thread_ts = finalPayload.thread_ts;
+  }
+  
+  console.log("Chatbot payload:", JSON.stringify(chatbotPayload, null, 2));
+  
+  // Send to chatbot API
+  const resp = await fetch(CHATBOT_SEND_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(finalPayload)
+    body: JSON.stringify(chatbotPayload)
   });
-  
-  // If chatbot API fails with 401, try team chat API as fallback
-  if (!resp.ok && resp.status === 401) {
-    console.log("Chatbot API returned 401, trying Team Chat API instead...");
-    
-    // Team Chat API might use slightly different payload format
-    const teamChatPayload = {
-      to_jid: finalPayload.to_jid,
-      message: finalPayload.content.body[0]?.text || "",
-      visible_to_user: finalPayload.visible_to_user,
-      thread_ts: finalPayload.thread_ts
-    };
-    
-    resp = await fetch(TEAM_CHAT_SEND_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(teamChatPayload)
-    });
-  }
   
   if (!resp.ok) {
     const text = await resp.text();
-    console.error("Chat API error:", resp.status, text);
-    console.error("Payload sent:", JSON.stringify(finalPayload, null, 2));
+    console.error("Chatbot API error:", resp.status, text);
+    console.error("Payload sent:", JSON.stringify(chatbotPayload, null, 2));
     
-    // If 401, suggest checking scopes
+    // Provide specific error guidance
     if (resp.status === 401) {
       console.error("NOTE: 401 error usually means:");
-      console.error("1. Token missing 'imchat:bot' scope (for chatbot API)");
-      console.error("2. Token missing 'chat_message:write' scope (for team chat API)");
-      console.error("3. Need to re-authorize with correct scopes");
-      console.error("4. For admin OAuth, chatbot feature may need special configuration");
+      console.error("1. Token missing 'imchat:bot' scope");
+      console.error("2. Bot JID incorrect:", robotJid);
+      console.error("3. Need to re-authorize with chatbot scopes");
+      console.error("4. Check that chatbot feature is enabled in Zoom app");
+    } else if (resp.status === 404) {
+      console.error("NOTE: 404 error means endpoint not recognized");
+      console.error("1. Verify chatbot feature is enabled in Zoom app");
+      console.error("2. Check that bot JID is correct:", robotJid);
+      console.error("3. Ensure app is published/activated");
     }
     
-    throw new Error(`Chat send failed: ${resp.status} ${text}`);
+    throw new Error(`Chatbot send failed: ${resp.status} ${text}`);
   }
   
   console.log("Message sent successfully");
