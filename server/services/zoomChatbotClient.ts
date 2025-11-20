@@ -43,7 +43,12 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     account_id: accountId
   };
 
-  console.log("Sending chatbot message (account_id:", accountId, ")");
+  console.log("Sending chatbot message:", {
+    account_id: accountId,
+    to_jid: payload.to_jid,
+    visible_to_user: payload.visible_to_user,
+    has_thread_ts: !!payload.thread_ts
+  });
   
   const resp = await fetch(CHATBOT_SEND_URL, {
     method: "POST",
@@ -57,8 +62,20 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   if (!resp.ok) {
     const text = await resp.text();
     console.error("Chatbot API error:", resp.status, text);
+    console.error("Payload sent:", JSON.stringify(finalPayload, null, 2));
+    
+    // If 401, suggest checking scopes
+    if (resp.status === 401) {
+      console.error("NOTE: 401 error usually means:");
+      console.error("1. Token missing 'imchat:bot' scope");
+      console.error("2. Need to re-authorize with chatbot scopes");
+      console.error("3. Check Zoom app scopes include: imchat:bot, chat_message:write");
+    }
+    
     throw new Error(`Chatbot send failed: ${resp.status} ${text}`);
   }
+  
+  console.log("Chatbot message sent successfully");
 }
 
 

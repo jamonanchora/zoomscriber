@@ -20,12 +20,42 @@ app.get("/debug/token", async (_req, res) => {
     const tokenRecord = getToken("admin");
     const now = Date.now();
     
+    let tokenScopes: string | null = null;
+    let userInfo: any = null;
+    
+    try {
+      const token = await getZoomAccessToken();
+      // Try to get user info to check token works
+      const userResp = await fetch("https://api.zoom.us/v2/users/me", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (userResp.ok) {
+        userInfo = await userResp.json();
+      }
+      
+      // Try to decode token to see scopes (JWT format)
+      // Note: Zoom tokens might not be JWTs, so this might not work
+      try {
+        const parts = token.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+          tokenScopes = payload.scope || payload.scopes || "N/A";
+        }
+      } catch {
+        // Not a JWT, that's fine
+      }
+    } catch (err) {
+      // Ignore
+    }
+    
     res.json({
       hasToken: !!tokenRecord,
       expiresAt: tokenRecord?.expires_at,
       expiresIn: tokenRecord ? Math.round((tokenRecord.expires_at - now) / 1000) : null,
       isExpired: tokenRecord ? now >= tokenRecord.expires_at : true,
       hasRefreshToken: !!tokenRecord?.refresh_token,
+      tokenScopes,
+      userInfo: userInfo ? { id: userInfo.id, email: userInfo.email, account_id: userInfo.account_id } : null,
       testToken: (async () => {
         try {
           await getZoomAccessToken();
