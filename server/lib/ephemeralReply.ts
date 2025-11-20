@@ -12,9 +12,11 @@ export async function postEphemeralTextReply(params: {
     await sendChatbotMessage({
       to_jid: toJid,
       visible_to_user: visibleToUserId,
-      thread_ts: threadTs,
+      reply_to: threadTs, // Use reply_to for threading per API docs
       content: {
-        body: [{ type: "message", text }]
+        head: {
+          text: text
+        }
       }
     });
   } catch (err) {

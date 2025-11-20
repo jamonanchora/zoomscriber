@@ -145,7 +145,7 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
           visibleToUserId: String(visibleToUser), 
           fileId: fileId ? String(fileId) : "", 
           downloadUrl: downloadUrl,
-          threadTs: undefined 
+          messageId: messageId // Use messageId for reply_to threading
         });
         console.log("✓ Transcription completed and reply sent");
       } catch (err) {

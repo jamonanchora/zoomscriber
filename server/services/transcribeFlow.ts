@@ -8,11 +8,11 @@ export type TranscribeParams = {
   visibleToUserId: string; // reactor/invoker user id for ephemeral
   fileId: string; // file attachment id from the voice note
   downloadUrl?: string; // direct download URL (alternative to fileId)
-  threadTs?: string; // thread id/timestamp
+  messageId?: string; // original message ID for threading (reply_to)
 };
 
 export async function runTranscriptionFlow(params: TranscribeParams): Promise<void> {
-  const { toJid, visibleToUserId, fileId, downloadUrl, threadTs } = params;
+  const { toJid, visibleToUserId, fileId, downloadUrl, messageId } = params;
 
   console.log("Transcription flow started:", { toJid, visibleToUserId, fileId, downloadUrl, threadTs });
 
@@ -31,7 +31,7 @@ export async function runTranscriptionFlow(params: TranscribeParams): Promise<vo
 
     const text = transcript && transcript.trim().length > 0 ? transcript.trim() : "(No speech detected)";
     console.log("Posting ephemeral reply...");
-    await postEphemeralTextReply({ toJid, visibleToUserId, threadTs, text });
+    await postEphemeralTextReply({ toJid, visibleToUserId, threadTs: messageId, text });
     console.log("Ephemeral reply posted successfully");
   } catch (err) {
     console.error("Error in transcription flow:", err);

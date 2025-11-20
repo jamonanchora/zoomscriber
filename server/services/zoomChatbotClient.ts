@@ -5,11 +5,12 @@ export type ChatbotMessage = {
   to_jid: string; // channel or user JID
   account_id?: string;
   robot_jid?: string; // Bot JID for chatbot messages
-  visible_to_user?: string; // userId to make the message ephemeral
-  thread_ts?: string; // thread timestamp/id if applicable
+  visible_to_user?: string; // userId to make the message ephemeral (admin-managed only)
+  reply_to?: string; // Parent message ID to thread the reply
   content: {
-    head?: { text?: string };
-    body: Array<{ type: string; text?: string }>;
+    head: {
+      text: string;
+    };
   };
 };
 
@@ -77,7 +78,7 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     robot_jid: robotJid,
     to_jid: payload.to_jid,
     visible_to_user: payload.visible_to_user,
-    has_thread_ts: !!payload.thread_ts
+    has_reply_to: !!payload.reply_to
   });
   
   // Bot JID is required for chatbot messages
@@ -85,21 +86,23 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     throw new Error("Bot JID (robot_jid) is required. Set ZOOM_BOT_JID in environment or ensure bot is configured.");
   }
 
-  // Build the correct payload format for chatbot API
-  // Based on Zoom's chatbot API documentation
+  // Build the correct payload format per Zoom API documentation
+  // https://developers.zoom.us/docs/team-chat/send-edit-and-delete-messages/
   const chatbotPayload: any = {
-    robot_jid: robotJid, // Bot JID is required
-    to_jid: finalPayload.to_jid,
-    account_id: accountId,
-    content: finalPayload.content
+    robot_jid: robotJid, // Required: Bot JID
+    to_jid: finalPayload.to_jid, // Required: User or channel JID
+    account_id: accountId, // Required: Account ID
+    content: finalPayload.content // Required: Content with head.text
   };
   
-  // Add optional fields
+  // Optional fields per API docs
   if (finalPayload.visible_to_user) {
+    // Admin-managed only: User ID for ephemeral messages
     chatbotPayload.visible_to_user = finalPayload.visible_to_user;
   }
-  if (finalPayload.thread_ts) {
-    chatbotPayload.thread_ts = finalPayload.thread_ts;
+  if (finalPayload.reply_to) {
+    // Optional: Parent message ID to thread the reply
+    chatbotPayload.reply_to = finalPayload.reply_to;
   }
   
   console.log("Chatbot payload:", JSON.stringify(chatbotPayload, null, 2));
