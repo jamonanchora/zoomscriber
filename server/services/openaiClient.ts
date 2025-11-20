@@ -7,7 +7,7 @@ export type TranscriptionOptions = {
 export async function transcribeAudio(buffer: Buffer, opts?: TranscriptionOptions): Promise<string> {
   const config = loadConfig();
   const form = new FormData();
-  form.append("file", new Blob([buffer]), "audio.m4a");
+  form.append("file", new Blob([new Uint8Array(buffer)]), "audio.m4a");
   form.append("model", "whisper-1");
   if (opts?.languageHints && opts.languageHints.length > 0) {
     // Whisper does language autodetect; hints are informational (no official param), so we ignore here.
