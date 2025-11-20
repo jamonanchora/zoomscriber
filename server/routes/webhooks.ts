@@ -80,8 +80,9 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
       const messageId = payload?.object?.msg_id || payload?.msg_id;
       const contactId = payload?.object?.contact_id || payload?.contact_id;
       const contactMemberId = payload?.object?.contact_member_id;
+      const contactEmail = payload?.object?.contact_email;
       
-      console.log("Extracted values:", { userId, messageId, contactId, contactMemberId });
+      console.log("Extracted values:", { userId, messageId, contactId, contactMemberId, contactEmail });
 
       if (!userId || !messageId) {
         console.error("Missing required fields - userId:", userId, "messageId:", messageId);
@@ -99,18 +100,17 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
 
       // We need to fetch the message to get the file attachment
       // Zoom's reaction event doesn't include the full message with files
-      console.log("Fetching message details for messageId:", messageId, "toJid:", toJid);
+      console.log("Fetching message details for messageId:", messageId, "toJid:", toJid, "contactEmail:", contactEmail);
       
       let fileId: string | undefined;
       try {
-        const message = await getChatMessage(messageId, toJid);
+        const message = await getChatMessage(messageId, toJid, contactEmail);
         if (message) {
           console.log("Message fetched:", JSON.stringify(message, null, 2));
           fileId = message?.file?.id || message?.files?.[0]?.id;
+          console.log("File ID extracted:", fileId);
         } else {
-          console.log("Could not fetch message directly, trying chat history search...");
-          // If direct fetch doesn't work, we might need to use chat history API
-          // For now, let's see if we can find the file another way
+          console.error("Could not fetch message - message not found or API error");
         }
       } catch (err) {
         console.error("Error fetching message:", err);

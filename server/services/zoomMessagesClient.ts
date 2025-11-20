@@ -20,57 +20,30 @@ export type ChatMessage = {
   to_jid?: string;
 };
 
-export async function getChatMessage(messageId: string, toJid: string): Promise<ChatMessage | null> {
+export async function getChatMessage(messageId: string, toJid: string, contactEmail?: string): Promise<ChatMessage | null> {
   const token = await getZoomAccessToken();
   
-  // Zoom Team Chat API: Use chat history/search to find message
-  // Try searching for messages in the chat (DM or channel)
-  // The toJid should be the contact_member_id for DMs or channel_id for channels
+  // Zoom Team Chat API: Get a message by ID
+  // Endpoint: GET /v2/chat/users/me/messages/{messageId}
+  // For DMs: use to_contact parameter with email
+  // For channels: use to_channel parameter with channel ID
   
-  // Use chat messages list/search API
-  // Note: This might require pagination or filtering by message ID
-  const url = `https://api.zoom.us/v2/team-chat/chat/messages/search`;
+  const url = `https://api.zoom.us/v2/chat/users/me/messages/${encodeURIComponent(messageId)}`;
   
   try {
-    // Search for the specific message by ID
-    // Note: Zoom's search API might work differently - this is a placeholder
-    // We might need to use chat history with date range instead
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        to_jid: toJid,
-        search_key: messageId,
-        search_type: 1 // Search by message ID if supported
-      })
-    });
-    
-    if (!resp.ok) {
-      // If search doesn't work, try chat history API
-      console.log("Search API failed, trying chat history...");
-      return await getMessageFromHistory(messageId, toJid, token);
+    // Build query params - prefer contact email for DMs
+    const params = new URLSearchParams();
+    if (contactEmail) {
+      params.append("to_contact", contactEmail);
+    } else {
+      // If no email, try using toJid as channel ID
+      params.append("to_channel", toJid);
     }
     
-    const data = (await resp.json()) as { messages?: ChatMessage[] };
-    const message = data.messages?.find(m => m.id === messageId);
-    return message || null;
-  } catch (err) {
-    console.error("Error fetching message via search:", err);
-    // Fallback to history API
-    return await getMessageFromHistory(messageId, toJid, token);
-  }
-}
-
-async function getMessageFromHistory(messageId: string, toJid: string, token: string): Promise<ChatMessage | null> {
-  // Use chat history API to get recent messages and find the one with matching ID
-  // This is a workaround since direct message fetch might not be available
-  const url = `https://api.zoom.us/v2/team-chat/chat/users/me/chat/messages`;
-  
-  try {
-    const resp = await fetch(`${url}?to_jid=${encodeURIComponent(toJid)}&page_size=50`, {
+    const fullUrl = `${url}?${params.toString()}`;
+    console.log("Fetching message from:", fullUrl);
+    
+    const resp = await fetch(fullUrl, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`
@@ -79,15 +52,29 @@ async function getMessageFromHistory(messageId: string, toJid: string, token: st
     
     if (!resp.ok) {
       const text = await resp.text();
-      console.error(`Chat history API failed: ${resp.status} ${text}`);
+      console.error(`Failed to fetch message: ${resp.status} ${text}`);
+      
+      // If to_contact failed and we have toJid, try as channel
+      if (contactEmail && resp.status === 404) {
+        console.log("Trying as channel instead...");
+        const channelUrl = `${url}?to_channel=${encodeURIComponent(toJid)}`;
+        const channelResp = await fetch(channelUrl, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        if (channelResp.ok) {
+          return (await channelResp.json()) as ChatMessage;
+        }
+      }
       return null;
     }
     
-    const data = (await resp.json()) as { messages?: ChatMessage[] };
-    const message = data.messages?.find(m => m.id === messageId);
-    return message || null;
+    const data = (await resp.json()) as ChatMessage;
+    return data;
   } catch (err) {
-    console.error("Error fetching from chat history:", err);
+    console.error("Error fetching message:", err);
     return null;
   }
 }
