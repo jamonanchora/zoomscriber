@@ -14,7 +14,7 @@ export type TranscribeParams = {
 export async function runTranscriptionFlow(params: TranscribeParams): Promise<void> {
   const { toJid, visibleToUserId, fileId, downloadUrl, messageId } = params;
 
-  console.log("Transcription flow started:", { toJid, visibleToUserId, fileId, downloadUrl, threadTs });
+  console.log("Transcription flow started:", { toJid, visibleToUserId, fileId, downloadUrl, messageId });
 
   try {
     console.log("Downloading file:", fileId || downloadUrl);

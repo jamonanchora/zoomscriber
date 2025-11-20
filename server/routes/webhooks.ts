@@ -53,10 +53,15 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
       if (cmd === "/zoomscribe") {
         const toJid = req.body.payload?.toJid || req.body.payload?.to_jid || req.body.payload?.toJID;
         const userId = req.body.payload?.userId || req.body.payload?.user_id || req.body.payload?.userID;
-        const threadTs = req.body.payload?.thread_ts || req.body.payload?.threadTs;
+        const referencedMessageId = req.body.payload?.messageId || req.body.payload?.message_id || req.body.payload?.msg_id;
         const referencedFileId = req.body.payload?.fileId || req.body.payload?.file_id;
         if (toJid && userId && referencedFileId) {
-          await runTranscriptionFlow({ toJid, visibleToUserId: String(userId), fileId: String(referencedFileId), threadTs });
+          await runTranscriptionFlow({ 
+            toJid, 
+            visibleToUserId: String(userId), 
+            fileId: String(referencedFileId), 
+            messageId: referencedMessageId 
+          });
         }
         return;
       }
