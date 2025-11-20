@@ -12,6 +12,50 @@ app.get("/healthz", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+// Diagnostic endpoint to test chatbot API directly
+app.get("/debug/test-chatbot", async (_req, res) => {
+  try {
+    const { getZoomAccessToken } = await import("./services/zoomAuth.js");
+    const { loadConfig } = await import("./config.js");
+    const token = await getZoomAccessToken();
+    const config = loadConfig();
+    
+    if (!config.zoomBotJid) {
+      return res.status(400).json({ error: "ZOOM_BOT_JID not configured" });
+    }
+    
+    // Try a minimal chatbot API call
+    const testPayload = {
+      robot_jid: config.zoomBotJid,
+      to_jid: "test", // This will fail but should give us a different error if token is wrong
+      account_id: "test",
+      content: { head: { text: "test" } }
+    };
+    
+    const resp = await fetch("https://api.zoom.us/v2/im/chat/messages", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(testPayload)
+    });
+    
+    const text = await resp.text();
+    
+    res.json({
+      status: resp.status,
+      statusText: resp.statusText,
+      response: text,
+      tokenPrefix: token.substring(0, 30) + "...",
+      botJid: config.zoomBotJid,
+      note: "If status is 401, token doesn't work for chatbot API even though it works for other APIs"
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // Diagnostic endpoint to check token status
 app.get("/debug/token", async (_req, res) => {
   try {

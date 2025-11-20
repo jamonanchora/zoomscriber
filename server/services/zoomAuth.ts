@@ -67,6 +67,13 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
     throw new Error("Token refresh response missing access_token");
   }
   
+  // Log scopes for debugging
+  if (data.scope) {
+    console.log("Refreshed token scopes:", data.scope);
+    const scopes = data.scope.split(" ");
+    console.log("Has imchat:bot scope?", scopes.includes("imchat:bot"));
+  }
+  
   // Update both access and refresh tokens if provided
   if (data.refresh_token) {
     saveToken(ADMIN_ACCOUNT_ID, data.access_token, data.refresh_token, data.expires_in);
@@ -108,6 +115,14 @@ export async function exchangeCodeForToken(code: string): Promise<void> {
   const data = (await resp.json()) as TokenResponse;
   if (!data.access_token || !data.refresh_token) {
     throw new Error("Invalid token response: missing access_token or refresh_token");
+  }
+
+  // Log scopes for debugging
+  console.log("Token received with scopes:", data.scope || "not provided in response");
+  if (data.scope) {
+    const scopes = data.scope.split(" ");
+    console.log("Scopes list:", scopes);
+    console.log("Has imchat:bot scope?", scopes.includes("imchat:bot"));
   }
 
   saveToken(ADMIN_ACCOUNT_ID, data.access_token, data.refresh_token, data.expires_in);
