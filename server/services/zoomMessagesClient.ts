@@ -3,6 +3,9 @@ import { getZoomAccessToken } from "./zoomAuth.js";
 export type ChatMessage = {
   id?: string;
   message?: string;
+  file_id?: string; // Top-level file ID for audio files
+  file_name?: string;
+  file_size?: number;
   file?: {
     id: string;
     name: string;
@@ -10,14 +13,18 @@ export type ChatMessage = {
     type: string;
   };
   files?: Array<{
-    id: string;
-    name: string;
-    size: number;
-    type: string;
+    file_id?: string; // Note: Zoom uses file_id, not id
+    id?: string;
+    name?: string;
+    file_name?: string;
+    size?: number;
+    file_size?: number;
+    type?: string;
   }>;
   to_channel?: string;
   to_contact?: string;
   to_jid?: string;
+  message_type?: string; // e.g., "audio_file"
 };
 
 export async function getChatMessage(messageId: string, toJid: string, contactEmail?: string): Promise<ChatMessage | null> {

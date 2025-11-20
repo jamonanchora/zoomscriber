@@ -6,17 +6,18 @@ export type TranscribeParams = {
   toJid: string; // channel or user JID where original message lives
   visibleToUserId: string; // reactor/invoker user id for ephemeral
   fileId: string; // file attachment id from the voice note
+  downloadUrl?: string; // direct download URL (alternative to fileId)
   threadTs?: string; // thread id/timestamp
 };
 
 export async function runTranscriptionFlow(params: TranscribeParams): Promise<void> {
-  const { toJid, visibleToUserId, fileId, threadTs } = params;
+  const { toJid, visibleToUserId, fileId, downloadUrl, threadTs } = params;
 
-  console.log("Transcription flow started:", { toJid, visibleToUserId, fileId, threadTs });
+  console.log("Transcription flow started:", { toJid, visibleToUserId, fileId, downloadUrl, threadTs });
 
   try {
-    console.log("Downloading file:", fileId);
-    const { buffer } = await downloadChatFile(fileId);
+    console.log("Downloading file:", fileId || downloadUrl);
+    const { buffer } = await downloadChatFile(fileId, downloadUrl);
     console.log("File downloaded, size:", buffer.length, "bytes");
 
     console.log("Sending to OpenAI for transcription...");

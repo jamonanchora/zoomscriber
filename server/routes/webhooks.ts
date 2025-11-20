@@ -103,12 +103,22 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
       console.log("Fetching message details for messageId:", messageId, "toJid:", toJid, "contactEmail:", contactEmail);
       
       let fileId: string | undefined;
+      let downloadUrl: string | undefined;
       try {
         const message = await getChatMessage(messageId, toJid, contactEmail);
         if (message) {
           console.log("Message fetched:", JSON.stringify(message, null, 2));
-          fileId = message?.file?.id || message?.files?.[0]?.id;
+          // File ID can be at top level (file_id) or in files array (files[0].file_id)
+          fileId = (message as any)?.file_id || 
+                   message?.file?.id || 
+                   (message as any)?.files?.[0]?.file_id ||
+                   message?.files?.[0]?.id;
+          
+          // Also check for download_url (direct download link)
+          downloadUrl = (message as any)?.download_url || (message as any)?.files?.[0]?.download_url;
+          
           console.log("File ID extracted:", fileId);
+          console.log("Download URL extracted:", downloadUrl);
         } else {
           console.error("Could not fetch message - message not found or API error");
         }
@@ -116,9 +126,8 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
         console.error("Error fetching message:", err);
       }
 
-      if (!fileId) {
-        console.error("No file ID found. The message may not contain a voice note attachment.");
-        console.log("Note: May need to implement chat history API to find message with file");
+      if (!fileId && !downloadUrl) {
+        console.error("No file ID or download URL found. The message may not contain a voice note attachment.");
         return;
       }
 
@@ -127,7 +136,8 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
         await runTranscriptionFlow({ 
           toJid: String(toJid), 
           visibleToUserId: String(userId), 
-          fileId: String(fileId), 
+          fileId: fileId ? String(fileId) : "", 
+          downloadUrl: downloadUrl,
           threadTs: undefined 
         });
         console.log("Transcription flow completed successfully");
