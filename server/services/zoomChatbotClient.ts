@@ -5,7 +5,8 @@ export type ChatbotMessage = {
   to_jid: string; // channel or user JID
   account_id?: string;
   robot_jid?: string; // Bot JID for chatbot messages
-  visible_to_user?: string; // userId to make the message ephemeral (admin-managed only)
+  visible_to_user?: string; // User JID (not user ID) for ephemeral messages (admin-managed only)
+  user_jid?: string; // User JID (user-managed only, required for user-managed apps)
   reply_to?: string; // Parent message ID to thread the reply
   content: {
     head: {
@@ -86,8 +87,21 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     throw new Error("Bot JID (robot_jid) is required. Set ZOOM_BOT_JID in environment or ensure bot is configured.");
   }
 
+  // Account ID is required - must be present
+  if (!accountId) {
+    throw new Error("Account ID (account_id) is required but could not be determined. Token may not have access to user info.");
+  }
+  
+  // Validate all required fields are present
+  if (!finalPayload.to_jid) {
+    throw new Error("to_jid is required but missing.");
+  }
+  if (!finalPayload.content?.head?.text) {
+    throw new Error("content.head.text is required but missing.");
+  }
+
   // Build the correct payload format per Zoom API documentation
-  // https://developers.zoom.us/docs/team-chat/send-edit-and-delete-messages/
+  // https://developers.zoom.us/docs/api/chatbot/#tag/chatbot-messages/post/im/chat/messages
   const chatbotPayload: any = {
     robot_jid: robotJid, // Required: Bot JID
     to_jid: finalPayload.to_jid, // Required: User or channel JID
@@ -96,8 +110,9 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   };
   
   // Optional fields per API docs
+  // Note: visible_to_user should be a JID (member_id), not a user ID
   if (finalPayload.visible_to_user) {
-    // Admin-managed only: User ID for ephemeral messages
+    // Admin-managed only: User JID for ephemeral messages
     chatbotPayload.visible_to_user = finalPayload.visible_to_user;
   }
   if (finalPayload.reply_to) {
@@ -107,13 +122,24 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   
   console.log("Chatbot payload:", JSON.stringify(chatbotPayload, null, 2));
   
+  // Build headers exactly as shown in API docs
+  // https://developers.zoom.us/docs/api/chatbot/#tag/chatbot-messages/post/im/chat/messages
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${token}`
+  };
+  
+  console.log("Request URL:", CHATBOT_SEND_URL);
+  console.log("Request method: POST");
+  console.log("Request headers:", {
+    "Content-Type": headers["Content-Type"],
+    "Authorization": `Bearer ${token.substring(0, 30)}...`
+  });
+  
   // Send to chatbot API
   const resp = await fetch(CHATBOT_SEND_URL, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
+    headers,
     body: JSON.stringify(chatbotPayload)
   });
   
@@ -124,11 +150,13 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     
     // Provide specific error guidance
     if (resp.status === 401) {
-      console.error("NOTE: 401 error usually means:");
-      console.error("1. Token missing 'imchat:bot' scope");
-      console.error("2. Bot JID incorrect:", robotJid);
-      console.error("3. Need to re-authorize with chatbot scopes");
-      console.error("4. Check that chatbot feature is enabled in Zoom app");
+      console.error("NOTE: 401 Invalid authorization token error:");
+      console.error("1. Verify token has 'imchat:bot' scope (token appears valid for other APIs)");
+      console.error("2. Check Bot JID is correct:", robotJid);
+      console.error("3. Verify account_id is correct:", accountId);
+      console.error("4. For admin-managed OAuth, ensure chatbot feature is fully enabled");
+      console.error("5. Try re-authorizing the app to refresh token with all scopes");
+      console.error("6. Check if token needs to be a 'chatbot bearer token' vs regular OAuth token");
     } else if (resp.status === 404) {
       console.error("NOTE: 404 error means endpoint not recognized");
       console.error("1. Verify chatbot feature is enabled in Zoom app");
