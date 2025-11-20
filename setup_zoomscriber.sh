@@ -103,7 +103,7 @@ After=network.target
 Type=simple
 EnvironmentFile=/etc/${APP_NAME}.env
 WorkingDirectory=${APP_DIR}
-ExecStart=/usr/bin/node dist/server/index.js
+ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=3
 # Increase if handling large uploads
