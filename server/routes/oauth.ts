@@ -6,11 +6,11 @@ export const oauthRouter = Router();
 
 oauthRouter.get("/install", (_req: Request, res: Response) => {
   const config = loadConfig();
+  // Don't pass scope - use scopes configured in Zoom Marketplace app settings
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.zoomClientId,
-    redirect_uri: config.zoomRedirectUri,
-    scope: "chat_message:read chat_message:write chat_channel:read chat_file:read imchat:bot user:read"
+    redirect_uri: config.zoomRedirectUri
   });
   const authUrl = `https://zoom.us/oauth/authorize?${params.toString()}`;
   res.redirect(authUrl);
