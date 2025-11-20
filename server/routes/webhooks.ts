@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { verifyZoomRequest } from "../lib/verifyZoom.js";
 import { seenRecently, markSeen } from "../lib/idempotencyStore.js";
 import { runTranscriptionFlow } from "../services/transcribeFlow.js";
+import { getChatMessage } from "../services/zoomMessagesClient.js";
 
 export const zoomWebhookRouter = Router();
 
@@ -61,7 +62,8 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
       const payload = req.body?.payload ?? {};
       console.log("Reaction event payload:", JSON.stringify(payload, null, 2));
       
-      const emoji = payload?.reaction?.emoji || payload?.reaction_emoji || payload?.emoji;
+      // Emoji is in payload.object.emoji_alias for reaction events
+      const emoji = payload?.object?.emoji_alias || payload?.reaction?.emoji || payload?.reaction_emoji || payload?.emoji;
       console.log("Detected emoji:", emoji);
       
       // Normalize pencil matching
@@ -73,30 +75,50 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
         return;
       }
 
-      const toJid = payload?.message?.to_jid || payload?.channel?.to_jid || payload?.to_jid || payload?.toJid;
-      const userId = payload?.operator?.user_id || payload?.reactor?.user_id || payload?.user_id || payload?.operator_id;
-      const threadTs = payload?.message?.thread_ts || payload?.message?.ts || payload?.thread_ts;
+      // Extract user and message info from payload
+      const userId = payload?.operator_id || payload?.operator?.user_id || payload?.reactor?.user_id || payload?.user_id;
+      const messageId = payload?.object?.msg_id || payload?.msg_id;
+      const contactId = payload?.object?.contact_id || payload?.contact_id;
+      const contactMemberId = payload?.object?.contact_member_id;
+      
+      console.log("Extracted values:", { userId, messageId, contactId, contactMemberId });
 
-      console.log("Extracted values:", { toJid, userId, threadTs });
-
-      // Attempt to resolve an attached audio file id from payload
-      const message = payload?.message || {};
-      const fileId = message?.files?.[0]?.id || 
-                     message?.files?.[0]?.file_id ||
-                     message?.attachments?.[0]?.file_id ||
-                     message?.attachments?.[0]?.id ||
-                     payload?.file_id;
-
-      console.log("File ID found:", fileId);
-      console.log("Message structure:", JSON.stringify(message, null, 2));
-
-      if (!toJid || !userId) {
-        console.error("Missing required fields - toJid:", toJid, "userId:", userId);
+      if (!userId || !messageId) {
+        console.error("Missing required fields - userId:", userId, "messageId:", messageId);
         return;
       }
 
+      // For DMs, toJid is the contact_member_id (JID format)
+      // For channels, we'd need channel_id from payload
+      const toJid = contactMemberId || contactId;
+      
+      if (!toJid) {
+        console.error("Could not determine toJid from payload");
+        return;
+      }
+
+      // We need to fetch the message to get the file attachment
+      // Zoom's reaction event doesn't include the full message with files
+      console.log("Fetching message details for messageId:", messageId, "toJid:", toJid);
+      
+      let fileId: string | undefined;
+      try {
+        const message = await getChatMessage(messageId, toJid);
+        if (message) {
+          console.log("Message fetched:", JSON.stringify(message, null, 2));
+          fileId = message?.file?.id || message?.files?.[0]?.id;
+        } else {
+          console.log("Could not fetch message directly, trying chat history search...");
+          // If direct fetch doesn't work, we might need to use chat history API
+          // For now, let's see if we can find the file another way
+        }
+      } catch (err) {
+        console.error("Error fetching message:", err);
+      }
+
       if (!fileId) {
-        console.error("No file ID found in message. Message may not contain a voice note attachment.");
+        console.error("No file ID found. The message may not contain a voice note attachment.");
+        console.log("Note: May need to implement chat history API to find message with file");
         return;
       }
 
@@ -106,7 +128,7 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
           toJid: String(toJid), 
           visibleToUserId: String(userId), 
           fileId: String(fileId), 
-          threadTs: threadTs ? String(threadTs) : undefined 
+          threadTs: undefined 
         });
         console.log("Transcription flow completed successfully");
       } catch (err) {
