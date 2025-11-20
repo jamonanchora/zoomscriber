@@ -1,6 +1,7 @@
 import { downloadChatFile } from "./../services/zoomFilesClient.js";
 import { transcribeAudio } from "./openaiClient.js";
 import { postEphemeralTextReply } from "../lib/ephemeralReply.js";
+import { ensureSupportedFormat } from "./audioConverter.js";
 
 export type TranscribeParams = {
   toJid: string; // channel or user JID where original message lives
@@ -17,11 +18,15 @@ export async function runTranscriptionFlow(params: TranscribeParams): Promise<vo
 
   try {
     console.log("Downloading file:", fileId || downloadUrl);
-    const { buffer } = await downloadChatFile(fileId, downloadUrl);
-    console.log("File downloaded, size:", buffer.length, "bytes");
+    const { buffer, fileName } = await downloadChatFile(fileId, downloadUrl);
+    console.log("File downloaded, size:", buffer.length, "bytes", "filename:", fileName);
+
+    // Convert to supported format if needed (AMR -> MP3)
+    const { buffer: convertedBuffer, extension } = await ensureSupportedFormat(buffer, fileName);
+    console.log("Audio format:", extension, "size:", convertedBuffer.length, "bytes");
 
     console.log("Sending to OpenAI for transcription...");
-    const transcript = await transcribeAudio(buffer, { languageHints: ["en", "es"] });
+    const transcript = await transcribeAudio(convertedBuffer, { languageHints: ["en", "es"], extension });
     console.log("Transcription received:", transcript.substring(0, 100) + "...");
 
     const text = transcript && transcript.trim().length > 0 ? transcript.trim() : "(No speech detected)";

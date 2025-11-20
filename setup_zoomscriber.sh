@@ -27,7 +27,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y
 apt-get upgrade -y
-apt-get install -y git curl ufw ca-certificates gnupg lsb-release
+apt-get install -y git curl ufw ca-certificates gnupg lsb-release ffmpeg
 
 # Firewall
 ufw allow OpenSSH || true

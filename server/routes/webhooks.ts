@@ -30,13 +30,18 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
   res.status(200).send();
 
   try {
+    // Better deduplication: use message ID + user ID + timestamp for reaction events
     const eventId: string | undefined = req.body?.event_id ?? req.body?.eventId;
-    if (eventId) {
-      if (seenRecently(eventId)) {
-        console.log("Duplicate event ignored:", eventId);
+    const messageId = req.body?.payload?.object?.msg_id || req.body?.payload?.msg_id;
+    const userId = req.body?.payload?.operator_id || req.body?.payload?.operator?.user_id;
+    const dedupeKey = eventId || (messageId && userId ? `${messageId}-${userId}` : undefined);
+    
+    if (dedupeKey) {
+      if (seenRecently(dedupeKey)) {
+        console.log("Duplicate event ignored:", dedupeKey);
         return; // dedupe
       }
-      markSeen(eventId);
+      markSeen(dedupeKey);
     }
 
     const event: string | undefined = req.body?.event;
@@ -82,8 +87,6 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
       const contactMemberId = payload?.object?.contact_member_id;
       const contactEmail = payload?.object?.contact_email;
       
-      console.log("Extracted values:", { userId, messageId, contactId, contactMemberId, contactEmail });
-
       if (!userId || !messageId) {
         console.error("Missing required fields - userId:", userId, "messageId:", messageId);
         return;
@@ -100,14 +103,11 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
 
       // We need to fetch the message to get the file attachment
       // Zoom's reaction event doesn't include the full message with files
-      console.log("Fetching message details for messageId:", messageId, "toJid:", toJid, "contactEmail:", contactEmail);
-      
       let fileId: string | undefined;
       let downloadUrl: string | undefined;
       try {
         const message = await getChatMessage(messageId, toJid, contactEmail);
         if (message) {
-          console.log("Message fetched:", JSON.stringify(message, null, 2));
           // File ID can be at top level (file_id) or in files array (files[0].file_id)
           fileId = (message as any)?.file_id || 
                    message?.file?.id || 
@@ -116,9 +116,6 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
           
           // Also check for download_url (direct download link)
           downloadUrl = (message as any)?.download_url || (message as any)?.files?.[0]?.download_url;
-          
-          console.log("File ID extracted:", fileId);
-          console.log("Download URL extracted:", downloadUrl);
         } else {
           console.error("Could not fetch message - message not found or API error");
         }
@@ -140,9 +137,9 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
           downloadUrl: downloadUrl,
           threadTs: undefined 
         });
-        console.log("Transcription flow completed successfully");
+        console.log("✓ Transcription completed and reply sent");
       } catch (err) {
-        console.error("Transcription flow error:", err);
+        console.error("✗ Transcription flow error:", err instanceof Error ? err.message : String(err));
       }
       return;
     }

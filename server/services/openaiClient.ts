@@ -2,12 +2,15 @@ import { loadConfig } from "../config.js";
 
 export type TranscriptionOptions = {
   languageHints?: string[]; // e.g., ['en','es']
+  extension?: string; // file extension (mp3, m4a, etc.)
 };
 
 export async function transcribeAudio(buffer: Buffer, opts?: TranscriptionOptions): Promise<string> {
   const config = loadConfig();
   const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(buffer)]), "audio.m4a");
+  const ext = opts?.extension || "mp3";
+  const fileName = `audio.${ext}`;
+  form.append("file", new Blob([new Uint8Array(buffer)]), fileName);
   form.append("model", "whisper-1");
   if (opts?.languageHints && opts.languageHints.length > 0) {
     // Whisper does language autodetect; hints are informational (no official param), so we ignore here.
