@@ -8,7 +8,7 @@ APP_NAME="zoomscriber"
 APP_DIR="/opt/zoomscriber"
 APP_REPO="https://github.com/jamonanchora/zoomscriber.git"  # https is simplest on fresh servers
 APP_BRANCH="main"
-APP_DOMAIN="zoomscriber.servehttp.com"     # DNS must point to this server
+APP_DOMAIN="zoomscriber.jamonlyons.com"     # DNS must point to this server
 APP_PORT="3000"
 
 # Required secrets
