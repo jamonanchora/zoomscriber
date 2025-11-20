@@ -59,20 +59,58 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
     // Reaction events: team_chat.channel_reaction_added / team_chat.dm_reaction_added
     if (event === "team_chat.channel_reaction_added" || event === "team_chat.dm_reaction_added") {
       const payload = req.body?.payload ?? {};
-      const emoji = payload?.reaction?.emoji || payload?.reaction_emoji;
+      console.log("Reaction event payload:", JSON.stringify(payload, null, 2));
+      
+      const emoji = payload?.reaction?.emoji || payload?.reaction_emoji || payload?.emoji;
+      console.log("Detected emoji:", emoji);
+      
       // Normalize pencil matching
-      const isPencil = emoji === ":pencil:" || emoji === "pencil" || emoji === "✏️";
-      if (!isPencil) return;
+      const isPencil = emoji === ":pencil:" || emoji === "pencil" || emoji === "✏️" || emoji?.includes("pencil");
+      console.log("Is pencil reaction?", isPencil);
+      
+      if (!isPencil) {
+        console.log("Not a pencil reaction, ignoring");
+        return;
+      }
 
-      const toJid = payload?.message?.to_jid || payload?.channel?.to_jid || payload?.to_jid;
-      const userId = payload?.operator?.user_id || payload?.reactor?.user_id || payload?.user_id;
+      const toJid = payload?.message?.to_jid || payload?.channel?.to_jid || payload?.to_jid || payload?.toJid;
+      const userId = payload?.operator?.user_id || payload?.reactor?.user_id || payload?.user_id || payload?.operator_id;
       const threadTs = payload?.message?.thread_ts || payload?.message?.ts || payload?.thread_ts;
 
-      // Attempt to resolve an attached audio file id from payload
-      const fileId = payload?.message?.files?.[0]?.id || payload?.message?.attachments?.[0]?.file_id;
+      console.log("Extracted values:", { toJid, userId, threadTs });
 
-      if (toJid && userId && fileId) {
-        await runTranscriptionFlow({ toJid: String(toJid), visibleToUserId: String(userId), fileId: String(fileId), threadTs });
+      // Attempt to resolve an attached audio file id from payload
+      const message = payload?.message || {};
+      const fileId = message?.files?.[0]?.id || 
+                     message?.files?.[0]?.file_id ||
+                     message?.attachments?.[0]?.file_id ||
+                     message?.attachments?.[0]?.id ||
+                     payload?.file_id;
+
+      console.log("File ID found:", fileId);
+      console.log("Message structure:", JSON.stringify(message, null, 2));
+
+      if (!toJid || !userId) {
+        console.error("Missing required fields - toJid:", toJid, "userId:", userId);
+        return;
+      }
+
+      if (!fileId) {
+        console.error("No file ID found in message. Message may not contain a voice note attachment.");
+        return;
+      }
+
+      console.log("Starting transcription flow...");
+      try {
+        await runTranscriptionFlow({ 
+          toJid: String(toJid), 
+          visibleToUserId: String(userId), 
+          fileId: String(fileId), 
+          threadTs: threadTs ? String(threadTs) : undefined 
+        });
+        console.log("Transcription flow completed successfully");
+      } catch (err) {
+        console.error("Transcription flow error:", err);
       }
       return;
     }
