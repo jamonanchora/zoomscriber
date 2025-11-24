@@ -71,7 +71,10 @@ cp webhook-version/package.json package.json
 cp webhook-version/tsconfig.json tsconfig.json
 
 echo "Installing dependencies..."
-npm ci
+# Since package.json changed, we need to regenerate package-lock.json
+# Remove old lock file to avoid conflicts
+rm -f package-lock.json
+npm install
 
 echo "Building..."
 npm run build
