@@ -148,15 +148,22 @@ export async function getChatbotToken(): Promise<string> {
   console.log("Getting new chatbot token via Client Credentials Flow...");
   const creds = Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString("base64");
 
+  // For Client Credentials, we may need to request the imchat:bot scope explicitly
+  const params = new URLSearchParams({
+    grant_type: "client_credentials"
+  });
+  
+  // Try requesting the scope explicitly (may or may not be needed)
+  // The scope should be granted based on app configuration, but let's try requesting it
+  params.append("scope", "imchat:bot");
+
   const resp = await fetch("https://zoom.us/oauth/token", {
     method: "POST",
     headers: {
       Authorization: `Basic ${creds}`,
       "Content-Type": "application/x-www-form-urlencoded"
     },
-    body: new URLSearchParams({
-      grant_type: "client_credentials"
-    })
+    body: params
   });
 
   if (!resp.ok) {
@@ -175,6 +182,13 @@ export async function getChatbotToken(): Promise<string> {
     console.log("Chatbot token scopes:", data.scope);
     const scopes = data.scope.split(" ");
     console.log("Has imchat:bot scope?", scopes.includes("imchat:bot"));
+    if (!scopes.includes("imchat:bot")) {
+      console.error("WARNING: Client Credentials token does NOT have imchat:bot scope!");
+      console.error("This may be why the chatbot API is rejecting the token.");
+      console.error("Check app configuration in Zoom Marketplace to ensure imchat:bot scope is enabled for Client Credentials flow.");
+    }
+  } else {
+    console.warn("WARNING: Client Credentials token response did not include scope information");
   }
 
   // Cache the chatbot token (Client Credentials tokens don't have refresh tokens)
