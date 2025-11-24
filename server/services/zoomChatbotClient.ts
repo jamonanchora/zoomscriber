@@ -37,17 +37,36 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     }
   }
 
-  // Get account_id from payload, config, or database (in order of preference)
+  // Get account_id in priority order:
+  // 1. From payload (if explicitly provided)
+  // 2. From database (from bot_installed webhook - most reliable source)
+  // 3. From config/environment (fallback)
   const config = loadConfig();
-  let accountId = payload.account_id || config.zoomAccountId;
+  let accountId = payload.account_id;
   
-  // Try to get from database (from bot_installed webhook)
+  // Try to get from database (from bot_installed webhook) - this is the most reliable source
+  const storedAccountId = getAccountId();
+  if (!accountId && storedAccountId) {
+    accountId = storedAccountId;
+    console.log("Using account_id from database (from bot_installed webhook):", accountId);
+  }
+  
+  // Fallback to environment variable if not in database
   if (!accountId) {
-    const storedAccountId = getAccountId();
-    if (storedAccountId) {
-      accountId = storedAccountId;
-      console.log("Using account_id from database (from bot_installed webhook):", accountId);
+    accountId = config.zoomAccountId;
+    if (accountId) {
+      console.log("Using account_id from environment variable:", accountId);
     }
+  }
+  
+  // Warn if there's a mismatch between stored and env account_id
+  if (storedAccountId && config.zoomAccountId && storedAccountId !== config.zoomAccountId) {
+    console.warn("⚠️  WARNING: account_id mismatch detected!");
+    console.warn("  Database (from bot_installed):", storedAccountId);
+    console.warn("  Environment variable:", config.zoomAccountId);
+    console.warn("  Using:", accountId);
+    console.warn("  The account_id from bot_installed webhook is the correct one to use.");
+    console.warn("  If you continue getting 401 errors, verify the environment variable matches the installed account.");
   }
   
   // Fallback: Try to get from OAuth token if not found elsewhere
@@ -128,6 +147,10 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   // Log detailed information before sending
   console.log("=== Preparing to send chatbot message ===");
   console.log("Account ID:", accountId);
+  console.log("  - From payload:", payload.account_id || "not provided");
+  console.log("  - From database (bot_installed):", storedAccountId || "not available");
+  console.log("  - From environment:", config.zoomAccountId || "not set");
+  console.log("  - Final value being used:", accountId);
   console.log("Robot JID:", robotJid);
   console.log("To JID:", payload.to_jid);
   console.log("Visible to user:", payload.visible_to_user || "none (regular message)");

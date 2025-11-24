@@ -56,6 +56,30 @@ app.get("/debug/test-chatbot", async (_req, res) => {
   }
 });
 
+// Diagnostic endpoint to check account config
+app.get("/debug/account", async (_req, res) => {
+  try {
+    const { getAccountConfig } = await import("./db/accountStore.js");
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    const accountConfig = getAccountConfig();
+    
+    res.json({
+      storedAccountId: accountConfig?.account_id || null,
+      storedRobotJid: accountConfig?.robot_jid || null,
+      envAccountId: config.zoomAccountId || null,
+      envBotJid: config.zoomBotJid || null,
+      hasStoredConfig: !!accountConfig,
+      accountIdSource: accountConfig?.account_id ? "database (from bot_installed)" : "environment variable or not set",
+      mismatchWarning: accountConfig?.account_id && config.zoomAccountId && accountConfig.account_id !== config.zoomAccountId
+        ? `WARNING: Database account_id (${accountConfig.account_id}) differs from env var (${config.zoomAccountId})`
+        : null
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // Diagnostic endpoint to check token status
 app.get("/debug/token", async (_req, res) => {
   try {
