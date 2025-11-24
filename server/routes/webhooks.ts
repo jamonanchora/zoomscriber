@@ -18,24 +18,14 @@ zoomWebhookRouter.use(verifyZoomRequest);
 
 // Main webhook endpoint
 zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
-  // Log incoming webhook for debugging
+  // Log only important events
   const incomingEvent = req.body?.event;
-  console.log("Webhook received:", {
-    event: incomingEvent,
-    event_type: typeof incomingEvent,
-    hasPayload: !!req.body?.payload,
-    bodyKeys: Object.keys(req.body || {}),
-    headers: {
-      signature: req.get("x-zm-signature"),
-      timestamp: req.get("x-zm-request-timestamp")
-    }
-  });
-  
-  // If this looks like a bot_installed event (check various possible formats)
   if (incomingEvent === "bot_installed" || 
       incomingEvent === "bot.installed" ||
-      incomingEvent?.includes("bot") && incomingEvent?.includes("install")) {
-    console.log("⚠️  Possible bot_installed event detected - full body:", JSON.stringify(req.body, null, 2));
+      (incomingEvent?.includes("bot") && incomingEvent?.includes("install")) ||
+      incomingEvent === "team_chat.channel_reaction_added" ||
+      incomingEvent === "team_chat.dm_reaction_added") {
+    console.log(`Webhook: ${incomingEvent}`);
   }
 
   // Acknowledge immediately (Zoom expects 200 quickly)

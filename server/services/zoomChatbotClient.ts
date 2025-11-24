@@ -22,10 +22,12 @@ const CHATBOT_SEND_URL = "https://api.zoom.us/v2/im/chat/messages";
 export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void> {
   let token: string;
   try {
-    // Try Client Credentials Flow token first (required for chatbot API)
-    console.log("Attempting to get chatbot token via Client Credentials Flow...");
+    // Force refresh token if previous attempt failed (for 401 errors)
+    const forceRefresh = process.env.FORCE_REFRESH_CHATBOT_TOKEN === "true";
+    if (forceRefresh) {
+      process.env.FORCE_REFRESH_CHATBOT_TOKEN = "false"; // Reset after one use
+    }
     token = await getChatbotToken();
-    console.log("Using Client Credentials token for chatbot API");
   } catch (chatbotTokenErr) {
     console.warn("Failed to get Client Credentials token, falling back to OAuth token:", chatbotTokenErr);
     // Fallback to OAuth token (may not work, but worth trying)
@@ -46,32 +48,28 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   
   // Try to get from database (from bot_installed webhook) - this is the most reliable source
   const storedAccountId = getAccountId();
+  let accountIdSource = "payload";
+  
   if (!accountId && storedAccountId) {
     accountId = storedAccountId;
-    console.log("Using account_id from database (from bot_installed webhook):", accountId);
+    accountIdSource = "database (bot_installed/OAuth)";
   }
   
   // Fallback to environment variable if not in database
   if (!accountId) {
     accountId = config.zoomAccountId;
     if (accountId) {
-      console.log("Using account_id from environment variable:", accountId);
+      accountIdSource = "environment variable";
     }
   }
   
   // Warn if there's a mismatch between stored and env account_id
-  if (storedAccountId && config.zoomAccountId && storedAccountId !== config.zoomAccountId) {
-    console.warn("⚠️  WARNING: account_id mismatch detected!");
-    console.warn("  Database (from bot_installed):", storedAccountId);
-    console.warn("  Environment variable:", config.zoomAccountId);
-    console.warn("  Using:", accountId);
-    console.warn("  The account_id from bot_installed webhook is the correct one to use.");
-    console.warn("  If you continue getting 401 errors, verify the environment variable matches the installed account.");
+  if (storedAccountId && config.zoomAccountId && storedAccountId !== config.zoomAccountId && accountId === storedAccountId) {
+    console.warn(`⚠️  account_id mismatch: database (${storedAccountId}) differs from env (${config.zoomAccountId}). Using database value.`);
   }
   
   // Fallback: Try to get from OAuth token if not found elsewhere
   if (!accountId) {
-    console.warn("account_id not found in payload, config, or database. Attempting to fetch from OAuth token...");
     try {
       const oauthToken = await getZoomAccessToken();
       
@@ -82,7 +80,7 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
         const oauthAccountId = oauthPayload.account_id || oauthPayload.aid;
         if (oauthAccountId) {
           accountId = oauthAccountId;
-          console.log("Got account_id from OAuth token:", accountId);
+          accountIdSource = "OAuth token";
         }
       }
       
@@ -94,16 +92,19 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
         if (userResp.ok) {
           const userData = (await userResp.json()) as { account_id?: string };
           accountId = userData.account_id;
-          console.log("Got account_id from user info:", accountId);
+          if (accountId) {
+            accountIdSource = "user info API";
+          }
         }
       }
     } catch (err) {
-      console.warn("Could not fetch account_id from OAuth token:", err);
+      // Silent fallback - error will be thrown later if account_id is still missing
     }
-  } else if (payload.account_id) {
-    console.log("Using account_id from payload:", accountId);
-  } else if (config.zoomAccountId) {
-    console.log("Using account_id from environment variable:", accountId);
+  }
+  
+  // Single consolidated log message
+  if (accountId) {
+    console.log(`account_id: ${accountId} (from ${accountIdSource})`);
   }
 
   // Get bot JID from payload, config, or database (in order of preference)
@@ -144,31 +145,8 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     robot_jid: robotJid
   };
 
-  // Log detailed information before sending
-  console.log("=== Preparing to send chatbot message ===");
-  console.log("Account ID:", accountId);
-  console.log("  - From payload:", payload.account_id || "not provided");
-  console.log("  - From database (bot_installed):", storedAccountId || "not available");
-  console.log("  - From environment:", config.zoomAccountId || "not set");
-  console.log("  - Final value being used:", accountId);
-  console.log("Robot JID:", robotJid);
-  console.log("To JID:", payload.to_jid);
-  console.log("Visible to user:", payload.visible_to_user || "none (regular message)");
-  console.log("Reply to:", payload.reply_to || "none (new message)");
-  console.log("Message text:", payload.content.head.text.substring(0, 50) + (payload.content.head.text.length > 50 ? "..." : ""));
-  
-  // Decode token to log type and scope for debugging
-  try {
-    const tokenParts = token.split(".");
-    if (tokenParts.length === 3) {
-      const tokenPayload = JSON.parse(Buffer.from(tokenParts[1], "base64").toString());
-      console.log("Token type:", tokenPayload.type, "(2 = Client Credentials, 0 = OAuth)");
-      // Note: Scope may not be in token payload, it's usually in the response when requesting the token
-    }
-  } catch {
-    // Not a JWT or can't decode, that's fine
-  }
-  console.log("==========================================");
+  // Log essential information before sending (concise)
+  console.log(`Sending chatbot message: to=${payload.to_jid.substring(0, 20)}..., account_id=${accountId}, robot_jid=${robotJid}`);
   
   // Validate all required fields are present
   // According to Zoom API docs, account_id is REQUIRED for all chatbot message requests
@@ -213,7 +191,6 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   
   // account_id is REQUIRED per Zoom API docs - we've already validated it exists above
   chatbotPayload.account_id = accountId;
-  console.log("Including account_id in payload:", accountId);
   
   // Optional fields per API docs
   // Note: visible_to_user should be a JID (member_id), not a user ID
@@ -226,7 +203,6 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     chatbotPayload.reply_to = finalPayload.reply_to;
   }
   
-  console.log("Chatbot payload:", JSON.stringify(chatbotPayload, null, 2));
   
   // Build headers exactly as shown in API docs
   // https://developers.zoom.us/docs/api/chatbot/#tag/chatbot-messages/post/im/chat/messages
@@ -235,12 +211,6 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     "Authorization": `Bearer ${token}`
   };
   
-  console.log("Request URL:", CHATBOT_SEND_URL);
-  console.log("Request method: POST");
-  console.log("Request headers:", {
-    "Content-Type": headers["Content-Type"],
-    "Authorization": `Bearer ${token.substring(0, 30)}...`
-  });
   
   // Send to chatbot API
   // For admin-managed OAuth, ensure we're using the token correctly
@@ -250,7 +220,7 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     body: JSON.stringify(chatbotPayload)
   });
   
-  // Log full response for debugging
+  // Parse response
   const responseText = await resp.text();
   let responseData: any;
   try {
@@ -259,38 +229,17 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     responseData = { raw: responseText };
   }
   
-  console.log("Chatbot API response status:", resp.status);
-  console.log("Chatbot API response headers:", Object.fromEntries(resp.headers.entries()));
-  console.log("Chatbot API response body:", JSON.stringify(responseData, null, 2));
-  
   if (!resp.ok) {
-    console.error("Chatbot API error:", resp.status, JSON.stringify(responseData, null, 2));
-    console.error("Payload sent:", JSON.stringify(chatbotPayload, null, 2));
-    
-    // Provide specific error guidance
-    if (resp.status === 401) {
-      console.error("NOTE: 401 Invalid authorization token error:");
-      console.error("1. Verify Client Credentials token has 'imchat:bot' scope");
-      console.error("   - Token type should be 2 (Client Credentials)");
-      console.error("   - Scope should include 'imchat:bot' automatically based on app config");
-      console.error("2. Check Bot JID is correct:", robotJid);
-      console.error("3. Verify account_id is correct:", accountId);
-      console.error("   - Should come from bot_installed webhook (payload.accountId)");
-      console.error("   - Or set ZOOM_ACCOUNT_ID environment variable");
-      console.error("4. Ensure chatbot feature is fully enabled in Zoom app configuration");
-      console.error("5. Verify app is properly installed and bot_installed webhook was received");
-      console.error("6. Try requesting a new Client Credentials token (they expire after 1 hour)");
-    } else if (resp.status === 404) {
-      console.error("NOTE: 404 error means endpoint not recognized");
-      console.error("1. Verify chatbot feature is enabled in Zoom app");
-      console.error("2. Check that bot JID is correct:", robotJid);
-      console.error("3. Ensure app is published/activated");
-    }
-    
-    throw new Error(`Chatbot send failed: ${resp.status} ${JSON.stringify(responseData)}`);
+    console.log(`Chatbot API error ${resp.status}:`, responseData.message || responseData.code || "Unknown error");
   }
   
-  console.log("Message sent successfully");
+  if (!resp.ok) {
+    if (resp.status === 401) {
+      console.error(`❌ Chatbot API returned 401. Check: token has 'imchat:bot' scope, account_id=${accountId}, robot_jid=${robotJid}`);
+    }
+    throw new Error(`Chatbot send failed: ${resp.status} ${responseData.message || responseData.code || "Unknown error"}`);
+  }
 }
+
 
 
