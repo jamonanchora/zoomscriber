@@ -32,17 +32,27 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     try {
       // For admin-managed OAuth, try to get account_id from token or user info
       // First try decoding token to see if account_id is in there
+      let tokenAccountId: string | undefined;
       try {
         const parts = token.split(".");
         if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
-          if (payload.account_id) {
-            accountId = payload.account_id;
-            console.log("Got account_id from token:", accountId);
+          const tokenPayload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+          if (tokenPayload.account_id) {
+            tokenAccountId = tokenPayload.account_id;
+            console.log("Got account_id from token payload:", tokenAccountId);
           }
+          // Also check for other account-related fields
+          console.log("Token payload keys:", Object.keys(tokenPayload));
+          console.log("Token payload (sanitized):", {
+            account_id: tokenPayload.account_id,
+            aud: tokenPayload.aud,
+            iss: tokenPayload.iss,
+            exp: tokenPayload.exp,
+            iat: tokenPayload.iat
+          });
         }
-      } catch {
-        // Not a JWT or can't decode, that's fine
+      } catch (err) {
+        console.warn("Could not decode token:", err);
       }
       
       // If not in token, fetch from user info
@@ -54,7 +64,17 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
           const userData = (await userResp.json()) as { account_id?: string };
           accountId = userData.account_id;
           console.log("Got account_id from user info:", accountId);
+          
+          // Compare with token account_id if available
+          if (tokenAccountId && tokenAccountId !== accountId) {
+            console.warn(`Account ID mismatch: token has ${tokenAccountId}, user info has ${accountId}`);
+            // For chatbot API, maybe we should use the token's account_id?
+            accountId = tokenAccountId;
+            console.log("Using account_id from token for chatbot API");
+          }
         }
+      } else if (tokenAccountId && tokenAccountId !== accountId) {
+        console.warn(`Account ID mismatch: provided ${accountId}, token has ${tokenAccountId}`);
       }
     } catch (err) {
       console.warn("Could not fetch account_id:", err);
@@ -116,16 +136,19 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
 
   // Build the correct payload format per Zoom API documentation
   // https://developers.zoom.us/docs/api/chatbot/#tag/chatbot-messages/post/im/chat/messages
+  // For admin-managed OAuth, try with and without account_id to see which works
   const chatbotPayload: any = {
     robot_jid: robotJid, // Required: Bot JID
     to_jid: finalPayload.to_jid, // Required: User or channel JID
-    account_id: accountId, // Required: Account ID (must be present)
     content: finalPayload.content // Required: Content with head.text
   };
   
-  // Ensure account_id is present (required by API)
-  if (!accountId) {
-    throw new Error("account_id is required but could not be determined");
+  // Add account_id if we have it (required per API docs, but maybe inferred from token for admin-managed?)
+  if (accountId) {
+    chatbotPayload.account_id = accountId;
+    console.log("Including account_id in payload:", accountId);
+  } else {
+    console.warn("WARNING: account_id not found, trying without it (may fail for admin-managed)");
   }
   
   // Optional fields per API docs
