@@ -126,6 +126,51 @@ export async function exchangeCodeForToken(code: string): Promise<void> {
   }
 
   saveToken(ADMIN_ACCOUNT_ID, data.access_token, data.refresh_token, data.expires_in);
+  
+  // Extract and save account_id from OAuth token (backup if bot_installed webhook doesn't arrive)
+  try {
+    let accountId: string | undefined;
+    
+    // Try to get account_id from token payload
+    const tokenParts = data.access_token.split(".");
+    if (tokenParts.length === 3) {
+      const tokenPayload = JSON.parse(Buffer.from(tokenParts[1], "base64").toString());
+      accountId = tokenPayload.account_id || tokenPayload.aid;
+      if (accountId) {
+        console.log("Extracted account_id from OAuth token:", accountId);
+      }
+    }
+    
+    // If not in token, fetch from user info endpoint
+    if (!accountId) {
+      const userResp = await fetch("https://api.zoom.us/v2/users/me", {
+        headers: { Authorization: `Bearer ${data.access_token}` }
+      });
+      if (userResp.ok) {
+        const userData = (await userResp.json()) as { account_id?: string };
+        accountId = userData.account_id;
+        if (accountId) {
+          console.log("Fetched account_id from user info:", accountId);
+        }
+      }
+    }
+    
+    // Save account_id if we got it (this is a backup if bot_installed webhook doesn't arrive)
+    if (accountId) {
+      const { saveAccountConfig } = await import("../db/accountStore.js");
+      // Note: We don't have robot_jid from OAuth, so we'll save just account_id
+      // robot_jid should come from bot_installed webhook or environment variable
+      saveAccountConfig(accountId);
+      console.log("✓ Account ID saved from OAuth authorization:", accountId);
+      console.log("  (Note: This is a backup - bot_installed webhook is the preferred source)");
+    } else {
+      console.warn("Could not extract account_id from OAuth token or user info");
+      console.warn("You may need to set ZOOM_ACCOUNT_ID environment variable or receive bot_installed webhook");
+    }
+  } catch (err) {
+    console.warn("Error extracting account_id from OAuth token:", err);
+    console.warn("This is not critical - account_id can also come from bot_installed webhook or environment variable");
+  }
 }
 
 /**
