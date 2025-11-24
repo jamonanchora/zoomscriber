@@ -9,9 +9,12 @@ export async function postEphemeralTextReply(params: {
   const { toJid, visibleToUserId, threadTs, text } = params;
   
   try {
+    // For admin-managed OAuth, try with and without user_jid
+    // Some implementations may require user_jid even for admin-managed
     await sendChatbotMessage({
       to_jid: toJid,
       visible_to_user: visibleToUserId,
+      user_jid: visibleToUserId, // Try including user_jid even for admin-managed
       reply_to: threadTs, // Use reply_to for threading per API docs
       content: {
         head: {

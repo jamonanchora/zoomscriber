@@ -30,16 +30,34 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   let accountId = payload.account_id;
   if (!accountId) {
     try {
-      // Fetch user info to get account_id
-      const userResp = await fetch("https://api.zoom.us/v2/users/me", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (userResp.ok) {
-        const userData = (await userResp.json()) as { account_id?: string };
-        accountId = userData.account_id;
+      // For admin-managed OAuth, try to get account_id from token or user info
+      // First try decoding token to see if account_id is in there
+      try {
+        const parts = token.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+          if (payload.account_id) {
+            accountId = payload.account_id;
+            console.log("Got account_id from token:", accountId);
+          }
+        }
+      } catch {
+        // Not a JWT or can't decode, that's fine
+      }
+      
+      // If not in token, fetch from user info
+      if (!accountId) {
+        const userResp = await fetch("https://api.zoom.us/v2/users/me", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (userResp.ok) {
+          const userData = (await userResp.json()) as { account_id?: string };
+          accountId = userData.account_id;
+          console.log("Got account_id from user info:", accountId);
+        }
       }
     } catch (err) {
-      console.warn("Could not fetch account_id from user info:", err);
+      console.warn("Could not fetch account_id:", err);
     }
   }
 
@@ -87,12 +105,8 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     throw new Error("Bot JID (robot_jid) is required. Set ZOOM_BOT_JID in environment or ensure bot is configured.");
   }
 
-  // Account ID is required - must be present
-  if (!accountId) {
-    throw new Error("Account ID (account_id) is required but could not be determined. Token may not have access to user info.");
-  }
-  
   // Validate all required fields are present
+  // Note: account_id might be optional for admin-managed if inferred from token
   if (!finalPayload.to_jid) {
     throw new Error("to_jid is required but missing.");
   }
@@ -105,9 +119,14 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   const chatbotPayload: any = {
     robot_jid: robotJid, // Required: Bot JID
     to_jid: finalPayload.to_jid, // Required: User or channel JID
-    account_id: accountId, // Required: Account ID
+    account_id: accountId, // Required: Account ID (must be present)
     content: finalPayload.content // Required: Content with head.text
   };
+  
+  // Ensure account_id is present (required by API)
+  if (!accountId) {
+    throw new Error("account_id is required but could not be determined");
+  }
   
   // Optional fields per API docs
   // Note: visible_to_user should be a JID (member_id), not a user ID
@@ -137,15 +156,28 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
   });
   
   // Send to chatbot API
+  // For admin-managed OAuth, ensure we're using the token correctly
   const resp = await fetch(CHATBOT_SEND_URL, {
     method: "POST",
     headers,
     body: JSON.stringify(chatbotPayload)
   });
   
+  // Log full response for debugging
+  const responseText = await resp.text();
+  let responseData: any;
+  try {
+    responseData = JSON.parse(responseText);
+  } catch {
+    responseData = { raw: responseText };
+  }
+  
+  console.log("Chatbot API response status:", resp.status);
+  console.log("Chatbot API response headers:", Object.fromEntries(resp.headers.entries()));
+  console.log("Chatbot API response body:", JSON.stringify(responseData, null, 2));
+  
   if (!resp.ok) {
-    const text = await resp.text();
-    console.error("Chatbot API error:", resp.status, text);
+    console.error("Chatbot API error:", resp.status, JSON.stringify(responseData, null, 2));
     console.error("Payload sent:", JSON.stringify(chatbotPayload, null, 2));
     
     // Provide specific error guidance
@@ -164,7 +196,7 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
       console.error("3. Ensure app is published/activated");
     }
     
-    throw new Error(`Chatbot send failed: ${resp.status} ${text}`);
+    throw new Error(`Chatbot send failed: ${resp.status} ${JSON.stringify(responseData)}`);
   }
   
   console.log("Message sent successfully");
