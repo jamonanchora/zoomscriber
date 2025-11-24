@@ -49,6 +49,8 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
             aid: tokenPayload.aid,
             uid: tokenPayload.uid,
             auid: tokenPayload.auid,
+            type: tokenPayload.type,
+            code: tokenPayload.code,
             aud: tokenPayload.aud,
             iss: tokenPayload.iss,
             exp: tokenPayload.exp,
