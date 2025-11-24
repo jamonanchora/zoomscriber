@@ -4,6 +4,7 @@ export type AppConfig = {
   zoomClientSecret: string;
   zoomRedirectUri: string;
   zoomBotJid?: string; // Bot JID for chatbot messages
+  zoomAccountId?: string; // Account ID for chatbot API (required for Client Credentials tokens)
   zoomVerificationToken?: string; // legacy verification
   webhookSecret?: string; // if using JWS-based verification
   appBaseUrl: string;
@@ -17,6 +18,7 @@ export const loadConfig = (): AppConfig => {
     ZOOM_CLIENT_SECRET,
     ZOOM_REDIRECT_URI,
     ZOOM_BOT_JID,
+    ZOOM_ACCOUNT_ID,
     ZOOM_VERIFICATION_TOKEN,
     ZOOM_WEBHOOK_SECRET,
     APP_BASE_URL,
@@ -41,6 +43,7 @@ export const loadConfig = (): AppConfig => {
     zoomClientSecret: ZOOM_CLIENT_SECRET,
     zoomRedirectUri: redirectUri,
     zoomBotJid: ZOOM_BOT_JID,
+    zoomAccountId: ZOOM_ACCOUNT_ID,
     zoomVerificationToken: ZOOM_VERIFICATION_TOKEN,
     webhookSecret: ZOOM_WEBHOOK_SECRET,
     appBaseUrl: APP_BASE_URL,

@@ -36,84 +36,44 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     }
   }
 
-  // Get account_id from user info if not provided
-  let accountId = payload.account_id;
+  // Get account_id from config or payload (prefer config for Client Credentials tokens)
+  const config = loadConfig();
+  let accountId = payload.account_id || config.zoomAccountId;
+  
   if (!accountId) {
+    // Fallback: Try to get from OAuth token if not in config
+    console.warn("ZOOM_ACCOUNT_ID not set in environment, attempting to fetch from OAuth token...");
     try {
-      // Try decoding token to see if account_id is in there
-      let tokenAccountId: string | undefined;
-      let tokenType: number | undefined;
-      try {
-        const parts = token.split(".");
-        if (parts.length === 3) {
-          const tokenPayload = JSON.parse(Buffer.from(parts[1], "base64").toString());
-          // Check for account_id or aid (account ID) in token
-          tokenAccountId = tokenPayload.account_id || tokenPayload.aid;
-          tokenType = tokenPayload.type;
-          if (tokenAccountId) {
-            console.log("Got account_id from token payload:", tokenAccountId, "(from field:", tokenPayload.account_id ? "account_id" : "aid", ")");
-          }
-          // Also check for other account-related fields
-          console.log("Token payload keys:", Object.keys(tokenPayload));
-          console.log("Token payload (sanitized):", {
-            account_id: tokenPayload.account_id,
-            aid: tokenPayload.aid,
-            uid: tokenPayload.uid,
-            auid: tokenPayload.auid,
-            type: tokenPayload.type,
-            code: tokenPayload.code,
-            aud: tokenPayload.aud,
-            iss: tokenPayload.iss,
-            exp: tokenPayload.exp,
-            iat: tokenPayload.iat
-          });
+      const { getZoomAccessToken } = await import("./zoomAuth.js");
+      const oauthToken = await getZoomAccessToken();
+      
+      // Try to get account_id from OAuth token
+      const oauthParts = oauthToken.split(".");
+      if (oauthParts.length === 3) {
+        const oauthPayload = JSON.parse(Buffer.from(oauthParts[1], "base64").toString());
+        const oauthAccountId = oauthPayload.account_id || oauthPayload.aid;
+        if (oauthAccountId) {
+          accountId = oauthAccountId;
+          console.log("Got account_id from OAuth token:", accountId);
         }
-      } catch (err) {
-        console.warn("Could not decode token:", err);
       }
       
-      // If token has account_id (OAuth token, type 0), use it
-      if (tokenAccountId) {
-        accountId = tokenAccountId;
-        console.log("Using account_id from token:", accountId);
-      } else {
-        // For Client Credentials tokens (type 2), they don't have account_id
-        // We need to get it from the OAuth token or user info
-        console.log("Token is Client Credentials (type 2), fetching account_id from OAuth token...");
-        try {
-          // Get OAuth token to fetch account_id
-          const { getZoomAccessToken } = await import("./zoomAuth.js");
-          const oauthToken = await getZoomAccessToken();
-          
-          // Try to get account_id from OAuth token
-          const oauthParts = oauthToken.split(".");
-          if (oauthParts.length === 3) {
-            const oauthPayload = JSON.parse(Buffer.from(oauthParts[1], "base64").toString());
-            const oauthAccountId = oauthPayload.account_id || oauthPayload.aid;
-            if (oauthAccountId) {
-              accountId = oauthAccountId;
-              console.log("Got account_id from OAuth token:", accountId);
-            }
-          }
-          
-          // If still no account_id, try fetching from user info with OAuth token
-          if (!accountId) {
-            const userResp = await fetch("https://api.zoom.us/v2/users/me", {
-              headers: { Authorization: `Bearer ${oauthToken}` }
-            });
-            if (userResp.ok) {
-              const userData = (await userResp.json()) as { account_id?: string };
-              accountId = userData.account_id;
-              console.log("Got account_id from user info:", accountId);
-            }
-          }
-        } catch (err) {
-          console.warn("Could not fetch account_id from OAuth token:", err);
+      // If still no account_id, try fetching from user info with OAuth token
+      if (!accountId) {
+        const userResp = await fetch("https://api.zoom.us/v2/users/me", {
+          headers: { Authorization: `Bearer ${oauthToken}` }
+        });
+        if (userResp.ok) {
+          const userData = (await userResp.json()) as { account_id?: string };
+          accountId = userData.account_id;
+          console.log("Got account_id from user info:", accountId);
         }
       }
     } catch (err) {
-      console.warn("Could not fetch account_id:", err);
+      console.warn("Could not fetch account_id from OAuth token:", err);
     }
+  } else if (config.zoomAccountId) {
+    console.log("Using account_id from environment variable:", accountId);
   }
 
   // Get bot JID from config or app info if not provided
