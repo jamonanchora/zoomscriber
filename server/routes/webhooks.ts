@@ -19,53 +19,91 @@ zoomWebhookRouter.use(verifyZoomRequest);
 // Main webhook endpoint
 zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
   // Log incoming webhook for debugging
+  const incomingEvent = req.body?.event;
   console.log("Webhook received:", {
-    event: req.body?.event,
+    event: incomingEvent,
+    event_type: typeof incomingEvent,
     hasPayload: !!req.body?.payload,
+    bodyKeys: Object.keys(req.body || {}),
     headers: {
       signature: req.get("x-zm-signature"),
       timestamp: req.get("x-zm-request-timestamp")
     }
   });
+  
+  // If this looks like a bot_installed event (check various possible formats)
+  if (incomingEvent === "bot_installed" || 
+      incomingEvent === "bot.installed" ||
+      incomingEvent?.includes("bot") && incomingEvent?.includes("install")) {
+    console.log("⚠️  Possible bot_installed event detected - full body:", JSON.stringify(req.body, null, 2));
+  }
 
   // Acknowledge immediately (Zoom expects 200 quickly)
   res.status(200).send();
 
   try {
     // Better deduplication: use message ID + user ID + timestamp for reaction events
+    // BUT: Don't dedupe bot_installed events - they should only happen once but we need to capture them
     const eventId: string | undefined = req.body?.event_id ?? req.body?.eventId;
     const messageId = req.body?.payload?.object?.msg_id || req.body?.payload?.msg_id;
     const userId = req.body?.payload?.operator_id || req.body?.payload?.operator?.user_id;
-    const dedupeKey = eventId || (messageId && userId ? `${messageId}-${userId}` : undefined);
+    const event: string | undefined = req.body?.event;
     
-    if (dedupeKey) {
-      if (seenRecently(dedupeKey)) {
-        console.log("Duplicate event ignored:", dedupeKey);
-        return; // dedupe
+    // Skip deduplication for bot_installed events (they're important and should only happen once anyway)
+    if (event !== "bot_installed" && event !== "bot.installed") {
+      const dedupeKey = eventId || (messageId && userId ? `${messageId}-${userId}` : undefined);
+      
+      if (dedupeKey) {
+        if (seenRecently(dedupeKey)) {
+          console.log("Duplicate event ignored:", dedupeKey);
+          return; // dedupe
+        }
+        markSeen(dedupeKey);
       }
-      markSeen(dedupeKey);
     }
 
-    const event: string | undefined = req.body?.event;
     console.log("Processing event:", event);
 
     // Bot installed event - capture account_id and robot_jid
-    if (event === "bot_installed") {
+    // Check multiple possible event name formats
+    if (event === "bot_installed" || event === "bot.installed" || event?.toLowerCase() === "bot_installed") {
       const payload = req.body?.payload ?? {};
-      const accountId = payload.accountId || payload.account_id;
-      const robotJid = payload.robotJid || payload.robot_jid;
       
-      console.log("Bot installed webhook received:", {
+      // Log the full payload for debugging
+      console.log("=== bot_installed webhook received ===");
+      console.log("Full webhook body:", JSON.stringify(req.body, null, 2));
+      console.log("Payload keys:", Object.keys(payload));
+      console.log("Full payload:", JSON.stringify(payload, null, 2));
+      
+      // Try multiple possible field names for accountId
+      const accountId = payload.accountId || 
+                       payload.account_id || 
+                       payload.accountId || 
+                       (payload as any).account;
+      
+      // Try multiple possible field names for robotJid
+      const robotJid = payload.robotJid || 
+                      payload.robot_jid || 
+                      payload.robotJID ||
+                      (payload as any).robot_jid ||
+                      (payload as any).jid;
+      
+      console.log("Extracted values:", {
         accountId,
         robotJid,
-        userId: payload.userId,
-        userName: payload.userName
+        userId: payload.userId || payload.user_id,
+        userName: payload.userName || payload.user_name,
+        timestamp: payload.timestamp
       });
       
       if (accountId) {
         // Save account_id and robot_jid to database
         saveAccountConfig(accountId, robotJid);
-        console.log("✓ Account config saved:", { account_id: accountId, robot_jid: robotJid });
+        console.log("✓ Account config saved to database:", { 
+          account_id: accountId, 
+          robot_jid: robotJid || "(not provided)" 
+        });
+        console.log("You can verify this at /debug/account endpoint");
         
         // Optionally send a welcome message
         // Note: According to Zoom docs, we can respond to the bot_installed webhook
@@ -73,8 +111,12 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
         // For now, we'll just log that we received it
         // The welcome message could be sent here if desired
       } else {
-        console.error("bot_installed webhook missing accountId");
+        console.error("❌ bot_installed webhook missing accountId!");
+        console.error("Payload fields:", Object.keys(payload));
+        console.error("Please check Zoom documentation for correct field names");
+        console.error("Full payload for debugging:", JSON.stringify(payload, null, 2));
       }
+      console.log("=====================================");
       return; // Don't process further for bot_installed events
     }
 
