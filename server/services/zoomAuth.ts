@@ -138,32 +138,46 @@ export async function getChatbotToken(): Promise<string> {
   const config = loadConfig();
   
   // Check if we have a cached chatbot token that's still valid
+  // For debugging: force refresh by setting FORCE_REFRESH_CHATBOT_TOKEN=true
+  const forceRefresh = process.env.FORCE_REFRESH_CHATBOT_TOKEN === "true";
   const tokenRecord = getToken(CHATBOT_TOKEN_ID);
-  if (tokenRecord && Date.now() < tokenRecord.expires_at - 60_000) {
+  
+  if (!forceRefresh && tokenRecord && Date.now() < tokenRecord.expires_at - 60_000) {
     console.log("Using cached chatbot token (expires in", Math.round((tokenRecord.expires_at - Date.now()) / 1000), "seconds)");
+    // Decode cached token to check scopes
+    try {
+      const parts = tokenRecord.access_token.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+        console.log("Cached token type:", payload.type);
+        // Note: Scopes may not be in the token payload, they're usually in the response
+      }
+    } catch {
+      // Not a JWT, that's fine
+    }
     return tokenRecord.access_token;
+  }
+  
+  if (forceRefresh) {
+    console.log("Force refreshing chatbot token (FORCE_REFRESH_CHATBOT_TOKEN=true)");
   }
 
   // Need to get a new chatbot token
+  // Per Zoom docs: grant_type should be in URL query parameter, not body
   console.log("Getting new chatbot token via Client Credentials Flow...");
   const creds = Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString("base64");
 
-  // For Client Credentials, we may need to request the imchat:bot scope explicitly
-  const params = new URLSearchParams({
-    grant_type: "client_credentials"
-  });
-  
-  // Try requesting the scope explicitly (may or may not be needed)
-  // The scope should be granted based on app configuration, but let's try requesting it
-  params.append("scope", "imchat:bot");
+  // According to Zoom docs, grant_type should be in the URL, not the body
+  // The scope "imchat:bot" should be automatically included based on app configuration
+  const url = "https://zoom.us/oauth/token?grant_type=client_credentials";
 
-  const resp = await fetch("https://zoom.us/oauth/token", {
+  const resp = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${creds}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: params
+      Authorization: `Basic ${creds}`
+      // Note: No Content-Type header needed when using URL params
+    }
+    // No body needed - grant_type is in URL
   });
 
   if (!resp.ok) {
@@ -178,17 +192,31 @@ export async function getChatbotToken(): Promise<string> {
   }
 
   console.log("Chatbot token obtained via Client Credentials Flow");
+  console.log("Full token response:", JSON.stringify({
+    access_token: data.access_token.substring(0, 30) + "...",
+    token_type: data.token_type,
+    expires_in: data.expires_in,
+    scope: data.scope || "NOT PROVIDED"
+  }, null, 2));
+  
   if (data.scope) {
     console.log("Chatbot token scopes:", data.scope);
     const scopes = data.scope.split(" ");
+    console.log("Scopes list:", scopes);
     console.log("Has imchat:bot scope?", scopes.includes("imchat:bot"));
     if (!scopes.includes("imchat:bot")) {
       console.error("WARNING: Client Credentials token does NOT have imchat:bot scope!");
-      console.error("This may be why the chatbot API is rejecting the token.");
-      console.error("Check app configuration in Zoom Marketplace to ensure imchat:bot scope is enabled for Client Credentials flow.");
+      console.error("This is likely why the chatbot API is rejecting the token.");
+      console.error("Possible solutions:");
+      console.error("1. Check app configuration in Zoom Marketplace");
+      console.error("2. Ensure 'imchat:bot' scope is enabled for Client Credentials flow");
+      console.error("3. Admin-managed OAuth apps may not support Client Credentials flow");
+      console.error("4. You may need to use Server-to-Server OAuth app type instead");
     }
   } else {
-    console.warn("WARNING: Client Credentials token response did not include scope information");
+    console.error("ERROR: Client Credentials token response did not include scope information");
+    console.error("This suggests the token may not have any scopes, which would explain the 401 error.");
+    console.error("Check your Zoom app configuration to ensure scopes are properly configured.");
   }
 
   // Cache the chatbot token (Client Credentials tokens don't have refresh tokens)
