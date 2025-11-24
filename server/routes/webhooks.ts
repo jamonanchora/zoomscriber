@@ -3,6 +3,8 @@ import { verifyZoomRequest } from "../lib/verifyZoom.js";
 import { seenRecently, markSeen } from "../lib/idempotencyStore.js";
 import { runTranscriptionFlow } from "../services/transcribeFlow.js";
 import { getChatMessage } from "../services/zoomMessagesClient.js";
+import { saveAccountConfig } from "../db/accountStore.js";
+import { sendChatbotMessage } from "../services/zoomChatbotClient.js";
 
 export const zoomWebhookRouter = Router();
 
@@ -46,6 +48,35 @@ zoomWebhookRouter.post("/", async (req: Request, res: Response) => {
 
     const event: string | undefined = req.body?.event;
     console.log("Processing event:", event);
+
+    // Bot installed event - capture account_id and robot_jid
+    if (event === "bot_installed") {
+      const payload = req.body?.payload ?? {};
+      const accountId = payload.accountId || payload.account_id;
+      const robotJid = payload.robotJid || payload.robot_jid;
+      
+      console.log("Bot installed webhook received:", {
+        accountId,
+        robotJid,
+        userId: payload.userId,
+        userName: payload.userName
+      });
+      
+      if (accountId) {
+        // Save account_id and robot_jid to database
+        saveAccountConfig(accountId, robotJid);
+        console.log("✓ Account config saved:", { account_id: accountId, robot_jid: robotJid });
+        
+        // Optionally send a welcome message
+        // Note: According to Zoom docs, we can respond to the bot_installed webhook
+        // with a Chatbot Message Object, but we need account_id which we just saved
+        // For now, we'll just log that we received it
+        // The welcome message could be sent here if desired
+      } else {
+        console.error("bot_installed webhook missing accountId");
+      }
+      return; // Don't process further for bot_installed events
+    }
 
     // Slash command delivery (shape may vary; handle commonly seen fields)
     if (event === "bot_notification" && req.body?.payload?.cmd) {

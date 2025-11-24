@@ -143,18 +143,27 @@ export async function getChatbotToken(): Promise<string> {
   const tokenRecord = getToken(CHATBOT_TOKEN_ID);
   
   if (!forceRefresh && tokenRecord && Date.now() < tokenRecord.expires_at - 60_000) {
-    console.log("Using cached chatbot token (expires in", Math.round((tokenRecord.expires_at - Date.now()) / 1000), "seconds)");
-    // Decode cached token to check scopes
+    const expiresIn = Math.round((tokenRecord.expires_at - Date.now()) / 1000);
+    console.log("Using cached chatbot token (expires in", expiresIn, "seconds)");
+    
+    // Decode cached token to verify type and log info
     try {
       const parts = tokenRecord.access_token.split(".");
       if (parts.length === 3) {
         const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
-        console.log("Cached token type:", payload.type);
-        // Note: Scopes may not be in the token payload, they're usually in the response
+        const tokenType = payload.type;
+        console.log("Cached token type:", tokenType, "(2 = Client Credentials, 0 = OAuth)");
+        
+        if (tokenType !== 2) {
+          console.warn("WARNING: Cached token type is", tokenType, "but expected 2 (Client Credentials)");
+        }
+        // Note: Scopes are not in the token payload, they're in the response when requesting the token
+        // We can't verify scope from the cached token itself
       }
     } catch {
-      // Not a JWT, that's fine
+      // Not a JWT or can't decode, that's fine - continue using the cached token
     }
+    
     return tokenRecord.access_token;
   }
   
@@ -199,24 +208,51 @@ export async function getChatbotToken(): Promise<string> {
     scope: data.scope || "NOT PROVIDED"
   }, null, 2));
   
+  // Verify token type is 2 (Client Credentials)
+  try {
+    const tokenParts = data.access_token.split(".");
+    if (tokenParts.length === 3) {
+      const tokenPayload = JSON.parse(Buffer.from(tokenParts[1], "base64").toString());
+      const tokenType = tokenPayload.type;
+      console.log("Decoded token type:", tokenType, "(2 = Client Credentials, 0 = OAuth Authorization Code)");
+      
+      if (tokenType !== 2) {
+        console.error("ERROR: Token type is", tokenType, "but expected 2 (Client Credentials)");
+        console.error("This token may not work with the chatbot API.");
+        console.error("Client Credentials tokens should have type=2 in the JWT payload.");
+      }
+    }
+  } catch (err) {
+    console.warn("Could not decode token to verify type:", err);
+  }
+
+  // Verify the token has the required imchat:bot scope
   if (data.scope) {
     console.log("Chatbot token scopes:", data.scope);
     const scopes = data.scope.split(" ");
     console.log("Scopes list:", scopes);
-    console.log("Has imchat:bot scope?", scopes.includes("imchat:bot"));
-    if (!scopes.includes("imchat:bot")) {
+    const hasImchatBotScope = scopes.includes("imchat:bot");
+    console.log("Has imchat:bot scope?", hasImchatBotScope);
+    
+    if (!hasImchatBotScope) {
       console.error("WARNING: Client Credentials token does NOT have imchat:bot scope!");
-      console.error("This is likely why the chatbot API is rejecting the token.");
-      console.error("Possible solutions:");
-      console.error("1. Check app configuration in Zoom Marketplace");
-      console.error("2. Ensure 'imchat:bot' scope is enabled for Client Credentials flow");
-      console.error("3. Admin-managed OAuth apps may not support Client Credentials flow");
-      console.error("4. You may need to use Server-to-Server OAuth app type instead");
+      console.error("This will cause 401 errors when trying to send chatbot messages.");
+      console.error("");
+      console.error("To fix this:");
+      console.error("1. Check your Zoom app configuration in the Marketplace");
+      console.error("2. Navigate to Features -> Surface -> Team Chat Subscription");
+      console.error("3. Ensure the chatbot feature is fully enabled");
+      console.error("4. The imchat:bot scope should be automatically included based on app configuration");
+      console.error("5. Verify the app type supports chatbot functionality");
+      // Don't throw here - let it try and fail with a 401 so we can see the actual error
+      // This is just a warning to help diagnose issues
+    } else {
+      console.log("✓ Token has required imchat:bot scope");
     }
   } else {
-    console.error("ERROR: Client Credentials token response did not include scope information");
-    console.error("This suggests the token may not have any scopes, which would explain the 401 error.");
-    console.error("Check your Zoom app configuration to ensure scopes are properly configured.");
+    console.warn("WARNING: Token response did not include scope information");
+    console.warn("Unable to verify imchat:bot scope. The request may still work if scope is inferred from app config.");
+    console.warn("If you get 401 errors, check your Zoom app configuration in the Marketplace.");
   }
 
   // Cache the chatbot token (Client Credentials tokens don't have refresh tokens)

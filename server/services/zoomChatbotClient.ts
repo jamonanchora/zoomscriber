@@ -1,5 +1,6 @@
 import { getZoomAccessToken, getChatbotToken } from "./zoomAuth.js";
 import { loadConfig } from "../config.js";
+import { getAccountId, getRobotJid } from "../db/accountStore.js";
 
 export type ChatbotMessage = {
   to_jid: string; // channel or user JID
@@ -36,18 +37,26 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     }
   }
 
-  // Get account_id from config or payload (prefer config for Client Credentials tokens)
+  // Get account_id from payload, config, or database (in order of preference)
   const config = loadConfig();
   let accountId = payload.account_id || config.zoomAccountId;
   
+  // Try to get from database (from bot_installed webhook)
   if (!accountId) {
-    // Fallback: Try to get from OAuth token if not in config
-    console.warn("ZOOM_ACCOUNT_ID not set in environment, attempting to fetch from OAuth token...");
+    const storedAccountId = getAccountId();
+    if (storedAccountId) {
+      accountId = storedAccountId;
+      console.log("Using account_id from database (from bot_installed webhook):", accountId);
+    }
+  }
+  
+  // Fallback: Try to get from OAuth token if not found elsewhere
+  if (!accountId) {
+    console.warn("account_id not found in payload, config, or database. Attempting to fetch from OAuth token...");
     try {
-      const { getZoomAccessToken } = await import("./zoomAuth.js");
       const oauthToken = await getZoomAccessToken();
       
-      // Try to get account_id from OAuth token
+      // Try to get account_id from OAuth token payload
       const oauthParts = oauthToken.split(".");
       if (oauthParts.length === 3) {
         const oauthPayload = JSON.parse(Buffer.from(oauthParts[1], "base64").toString());
@@ -72,32 +81,41 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     } catch (err) {
       console.warn("Could not fetch account_id from OAuth token:", err);
     }
+  } else if (payload.account_id) {
+    console.log("Using account_id from payload:", accountId);
   } else if (config.zoomAccountId) {
     console.log("Using account_id from environment variable:", accountId);
   }
 
-  // Get bot JID from config or app info if not provided
-  let robotJid = payload.robot_jid;
+  // Get bot JID from payload, config, or database (in order of preference)
+  let robotJid = payload.robot_jid || config.zoomBotJid;
+  
+  // Try to get from database (from bot_installed webhook)
   if (!robotJid) {
-    // First try config
-    const config = loadConfig();
-    robotJid = config.zoomBotJid;
-    
-    // If not in config, try to fetch from API
-    if (!robotJid) {
-      try {
-        // Fetch app info to get bot JID
-        // Note: This endpoint might vary - trying common patterns
-        const appResp = await fetch("https://api.zoom.us/v2/chatbots/me", {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (appResp.ok) {
-          const appData = (await appResp.json()) as { robot_jid?: string; jid?: string };
-          robotJid = appData.robot_jid || appData.jid;
+    const storedRobotJid = getRobotJid();
+    if (storedRobotJid) {
+      robotJid = storedRobotJid;
+      console.log("Using robot_jid from database (from bot_installed webhook):", robotJid);
+    }
+  }
+  
+  // If not in config or database, try to fetch from API
+  if (!robotJid) {
+    try {
+      // Fetch app info to get bot JID
+      // Note: This endpoint might vary - trying common patterns
+      const appResp = await fetch("https://api.zoom.us/v2/chatbots/me", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (appResp.ok) {
+        const appData = (await appResp.json()) as { robot_jid?: string; jid?: string };
+        robotJid = appData.robot_jid || appData.jid;
+        if (robotJid) {
+          console.log("Got robot_jid from API:", robotJid);
         }
-      } catch (err) {
-        console.warn("Could not fetch bot JID from API:", err);
       }
+    } catch (err) {
+      console.warn("Could not fetch bot JID from API:", err);
     }
   }
 
@@ -107,21 +125,53 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     robot_jid: robotJid
   };
 
-  console.log("Sending chatbot message:", {
-    account_id: accountId,
-    robot_jid: robotJid,
-    to_jid: payload.to_jid,
-    visible_to_user: payload.visible_to_user,
-    has_reply_to: !!payload.reply_to
-  });
+  // Log detailed information before sending
+  console.log("=== Preparing to send chatbot message ===");
+  console.log("Account ID:", accountId);
+  console.log("Robot JID:", robotJid);
+  console.log("To JID:", payload.to_jid);
+  console.log("Visible to user:", payload.visible_to_user || "none (regular message)");
+  console.log("Reply to:", payload.reply_to || "none (new message)");
+  console.log("Message text:", payload.content.head.text.substring(0, 50) + (payload.content.head.text.length > 50 ? "..." : ""));
   
-  // Bot JID is required for chatbot messages
-  if (!robotJid) {
-    throw new Error("Bot JID (robot_jid) is required. Set ZOOM_BOT_JID in environment or ensure bot is configured.");
+  // Decode token to log type and scope for debugging
+  try {
+    const tokenParts = token.split(".");
+    if (tokenParts.length === 3) {
+      const tokenPayload = JSON.parse(Buffer.from(tokenParts[1], "base64").toString());
+      console.log("Token type:", tokenPayload.type, "(2 = Client Credentials, 0 = OAuth)");
+      // Note: Scope may not be in token payload, it's usually in the response when requesting the token
+    }
+  } catch {
+    // Not a JWT or can't decode, that's fine
+  }
+  console.log("==========================================");
+  
+  // Validate all required fields are present
+  // According to Zoom API docs, account_id is REQUIRED for all chatbot message requests
+  if (!accountId) {
+    const errorMsg = [
+      "account_id is REQUIRED for chatbot messages but is missing.",
+      "",
+      "To fix this:",
+      "1. Re-install the bot to trigger the 'bot_installed' webhook, which will capture account_id",
+      "2. Or set ZOOM_ACCOUNT_ID environment variable",
+      "3. Or include account_id in the message payload",
+      "",
+      "The bot_installed webhook provides accountId in payload.accountId and should be automatically stored."
+    ].join("\n");
+    throw new Error(errorMsg);
   }
 
-  // Validate all required fields are present
-  // Note: account_id might be optional for admin-managed if inferred from token
+  // Bot JID is required for chatbot messages
+  if (!robotJid) {
+    throw new Error(
+      "Bot JID (robot_jid) is required. " +
+      "Set ZOOM_BOT_JID in environment, ensure bot_installed webhook captured it, " +
+      "or include robot_jid in the message payload."
+    );
+  }
+
   if (!finalPayload.to_jid) {
     throw new Error("to_jid is required but missing.");
   }
@@ -138,13 +188,9 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     content: finalPayload.content // Required: Content with head.text
   };
   
-  // Add account_id if we have it (required per API docs, but maybe inferred from token for admin-managed?)
-  if (accountId) {
-    chatbotPayload.account_id = accountId;
-    console.log("Including account_id in payload:", accountId);
-  } else {
-    console.warn("WARNING: account_id not found, trying without it (may fail for admin-managed)");
-  }
+  // account_id is REQUIRED per Zoom API docs - we've already validated it exists above
+  chatbotPayload.account_id = accountId;
+  console.log("Including account_id in payload:", accountId);
   
   // Optional fields per API docs
   // Note: visible_to_user should be a JID (member_id), not a user ID
@@ -201,12 +247,16 @@ export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void>
     // Provide specific error guidance
     if (resp.status === 401) {
       console.error("NOTE: 401 Invalid authorization token error:");
-      console.error("1. Verify token has 'imchat:bot' scope (token appears valid for other APIs)");
+      console.error("1. Verify Client Credentials token has 'imchat:bot' scope");
+      console.error("   - Token type should be 2 (Client Credentials)");
+      console.error("   - Scope should include 'imchat:bot' automatically based on app config");
       console.error("2. Check Bot JID is correct:", robotJid);
       console.error("3. Verify account_id is correct:", accountId);
-      console.error("4. For admin-managed OAuth, ensure chatbot feature is fully enabled");
-      console.error("5. Try re-authorizing the app to refresh token with all scopes");
-      console.error("6. Check if token needs to be a 'chatbot bearer token' vs regular OAuth token");
+      console.error("   - Should come from bot_installed webhook (payload.accountId)");
+      console.error("   - Or set ZOOM_ACCOUNT_ID environment variable");
+      console.error("4. Ensure chatbot feature is fully enabled in Zoom app configuration");
+      console.error("5. Verify app is properly installed and bot_installed webhook was received");
+      console.error("6. Try requesting a new Client Credentials token (they expire after 1 hour)");
     } else if (resp.status === 404) {
       console.error("NOTE: 404 error means endpoint not recognized");
       console.error("1. Verify chatbot feature is enabled in Zoom app");
