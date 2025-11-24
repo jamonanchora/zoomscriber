@@ -1,4 +1,4 @@
-import { getZoomAccessToken } from "./zoomAuth.js";
+import { getZoomAccessToken, getChatbotToken } from "./zoomAuth.js";
 import { loadConfig } from "../config.js";
 
 export type ChatbotMessage = {
@@ -21,9 +21,19 @@ const CHATBOT_SEND_URL = "https://api.zoom.us/v2/im/chat/messages";
 export async function sendChatbotMessage(payload: ChatbotMessage): Promise<void> {
   let token: string;
   try {
-    token = await getZoomAccessToken();
-  } catch (err) {
-    throw new Error(`Failed to get access token: ${err instanceof Error ? err.message : String(err)}`);
+    // Try Client Credentials Flow token first (required for chatbot API)
+    console.log("Attempting to get chatbot token via Client Credentials Flow...");
+    token = await getChatbotToken();
+    console.log("Using Client Credentials token for chatbot API");
+  } catch (chatbotTokenErr) {
+    console.warn("Failed to get Client Credentials token, falling back to OAuth token:", chatbotTokenErr);
+    // Fallback to OAuth token (may not work, but worth trying)
+    try {
+      token = await getZoomAccessToken();
+      console.warn("Using OAuth token for chatbot API (may not work)");
+    } catch (err) {
+      throw new Error(`Failed to get access token: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // Get account_id from user info if not provided

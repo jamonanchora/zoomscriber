@@ -127,3 +127,59 @@ export async function exchangeCodeForToken(code: string): Promise<void> {
 
   saveToken(ADMIN_ACCOUNT_ID, data.access_token, data.refresh_token, data.expires_in);
 }
+
+/**
+ * Get a chatbot-specific token using Client Credentials Flow
+ * The chatbot API requires Client Credentials tokens, not Authorization Code tokens
+ * Client Credentials tokens are cached and reused until they expire (typically 1 hour)
+ */
+export async function getChatbotToken(): Promise<string> {
+  const CHATBOT_TOKEN_ID = "chatbot";
+  const config = loadConfig();
+  
+  // Check if we have a cached chatbot token that's still valid
+  const tokenRecord = getToken(CHATBOT_TOKEN_ID);
+  if (tokenRecord && Date.now() < tokenRecord.expires_at - 60_000) {
+    console.log("Using cached chatbot token (expires in", Math.round((tokenRecord.expires_at - Date.now()) / 1000), "seconds)");
+    return tokenRecord.access_token;
+  }
+
+  // Need to get a new chatbot token
+  console.log("Getting new chatbot token via Client Credentials Flow...");
+  const creds = Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString("base64");
+
+  const resp = await fetch("https://zoom.us/oauth/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${creds}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials"
+    })
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    console.error("Chatbot token API error:", resp.status, text);
+    throw new Error(`Failed to get chatbot token: ${resp.status} ${text}`);
+  }
+
+  const data = (await resp.json()) as TokenResponse;
+  if (!data.access_token) {
+    throw new Error("Chatbot token response missing access_token");
+  }
+
+  console.log("Chatbot token obtained via Client Credentials Flow");
+  if (data.scope) {
+    console.log("Chatbot token scopes:", data.scope);
+    const scopes = data.scope.split(" ");
+    console.log("Has imchat:bot scope?", scopes.includes("imchat:bot"));
+  }
+
+  // Cache the chatbot token (Client Credentials tokens don't have refresh tokens)
+  // They typically last 1 hour - use empty string for refresh_token
+  saveToken(CHATBOT_TOKEN_ID, data.access_token, "", data.expires_in);
+  
+  return data.access_token;
+}
